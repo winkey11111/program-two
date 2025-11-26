@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+ultralytics
+opencv-python-headless
+numpy
+sqlalchemy
+pymysql
+aiofiles
+python-dotenv
