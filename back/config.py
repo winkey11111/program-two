@@ -16,16 +16,10 @@ for directory in [UPLOAD_DIR, RESULT_DIR, CAMERA_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # -------------------------------
-# 数据库配置
+# 数据库配置（改为 SQLite）
 # -------------------------------
-DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "Wds030408@")
-DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
-DB_PORT = os.getenv("DB_PORT", "3306")
-DB_NAME = os.getenv("DB_NAME", "yolo_db")
+# SQLite 数据库存放路径：与项目同级的 db 目录下
+DB_DIR = os.path.join(BASE_DIR, "db")
+os.makedirs(DB_DIR, exist_ok=True)  # 确保 db 目录存在
 
-# 对密码进行 URL 编码，防止特殊字符导致连接失败
-DB_PASSWORD_ENCODED = quote_plus(DB_PASSWORD)
-
-# SQLAlchemy 数据库 URL
-DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD_ENCODED}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
+DATABASE_URL = f"sqlite:///{os.path.join(DB_DIR, 'example.db')}"
