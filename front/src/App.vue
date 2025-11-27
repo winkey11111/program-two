@@ -35,7 +35,7 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background-image: url('D:/PythonProject/AI_demo/program-two/front/src/views/preview.gif');
+  background-image: url('.\views\preview.gif');
   background-size: cover;
   background-position: center;
   z-index: -1; /* 确保背景在所有元素之下 */
