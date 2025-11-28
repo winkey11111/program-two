@@ -123,7 +123,7 @@ function clearResult() {
 }
 
 function onTimeUpdate() {
-  // TODO: 后续根据视频时间戳匹配帧数据
+
   // 示例：假设后端返回 frames: [{ index, time, objects }, ...]
   // const currentTime = videoRef.value?.currentTime || 0
   // const frame = findClosestFrame(result.value.frames, currentTime)
