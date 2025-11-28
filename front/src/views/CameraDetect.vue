@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>摄像头识别（浏览器端）</h2>
+    <h2>摄像头识别</h2>
 
     <div>
       <video ref="localVideo" autoplay playsinline style="width:600px;height:auto;border:1px solid #ccc"></video>
