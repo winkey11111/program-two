@@ -21,7 +21,7 @@
       >
         上传并识别
       </el-button>
-      <el-button @click="store.clearImageResult" class="ml-8">
+      <el-button @click="handleClear" class="ml-8">
         清空
       </el-button>
     </div>
@@ -123,7 +123,7 @@
 
 <script setup>
 import { useDetectStore } from '@/stores/detect'
-import { uploadImage } from '@/api' // 确保路径正确
+import { uploadImage } from '@/api'
 import { ElMessage } from 'element-plus'
 import { Picture } from '@element-plus/icons-vue'
 import { ref, watch, nextTick } from 'vue'
@@ -167,6 +167,16 @@ watch(
   { deep: true }
 )
 
+// 👇 新增：监听 originalImageUrl 清空时，主动清空 canvas
+watch(
+  () => store.originalImageUrl,
+  (newUrl) => {
+    if (!newUrl) {
+      clearCanvas()
+    }
+  }
+)
+
 function beforeUpload(fileRaw) {
   store.imageFile = fileRaw
   store.originalImageUrl = URL.createObjectURL(fileRaw)
@@ -182,7 +192,6 @@ async function upload() {
     const data = await uploadImage(store.imageFile)
     store.result = data
 
-    // 确保每个 detection 有 visible 字段（默认 true）
     if (store.result.detections) {
       store.result.detections.forEach(det => {
         if (det.visible == null) det.visible = true
@@ -196,10 +205,20 @@ async function upload() {
   }
 }
 
-function handleImageClick() {
-  if (store.originalImageUrl) {
-    currentImageUrl.value = store.originalImageUrl
-    imageDialogVisible.value = true
+function handleClear() {
+  store.clearImageResult()
+  highlightId.value = null
+  clearCanvas()
+}
+
+function clearCanvas() {
+  const canvas = overlayCanvasRef.value
+  if (canvas) {
+    const ctx = canvas.getContext('2d')
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    // 重置 canvas 尺寸为 0，避免残留尺寸影响下次绘制
+    canvas.width = 0
+    canvas.height = 0
   }
 }
 
@@ -212,20 +231,20 @@ function onImageLoad() {
 function drawDetections() {
   const img = previewImageRef.value
   const canvas = overlayCanvasRef.value
-  if (!img || !canvas || !store.result?.detections) return
+  if (!img || !canvas || !store.result?.detections) {
+    clearCanvas()
+    return
+  }
 
   const ctx = canvas.getContext('2d')
   const naturalWidth = img.naturalWidth
   const naturalHeight = img.naturalHeight
 
-  // 设置 canvas 逻辑尺寸 = 原始图尺寸
   canvas.width = naturalWidth
   canvas.height = naturalHeight
 
-  // 清空画布
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-  // 绘制每个可见的检测框
   store.result.detections.forEach((det) => {
     const isVisible = det.visible !== false
     if (!isVisible) return
@@ -234,12 +253,10 @@ function drawDetections() {
     const color = `rgb(${det.color?.join(',') || '128,128,128'})`
     const isHighlighted = det.id === highlightId.value
 
-    // 框
     ctx.lineWidth = isHighlighted ? 4 : 2
     ctx.strokeStyle = color
     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
 
-    // 标签
     const label = `${det.id}:${det.class} ${Math.round(det.confidence * 100)}%`
     ctx.font = '14px Arial'
     const metrics = ctx.measureText(label)
@@ -263,18 +280,11 @@ function getRowClassName({ row }) {
   return row.id === highlightId.value ? 'highlight-row' : ''
 }
 
-// 切换单个目标可见性
 function toggleVisibility(detection, visible) {
   detection.visible = visible
   drawDetections()
-
-  // 可选：调用后端保存状态
-  // if (store.result?.id) {
-  //   toggleDetectionVisibility(store.result.id, detection.id, visible)
-  // }
 }
 
-// 切换全部
 function toggleAllVisible(visible) {
   if (store.result?.detections) {
     store.result.detections.forEach(d => {
@@ -348,7 +358,6 @@ h3 {
   position: relative;
 }
 
-/* 关键：让 img 和 canvas 完全重叠且适配 */
 .preview-image,
 .overlay-canvas {
   position: absolute;
@@ -382,7 +391,6 @@ h3 {
   padding: 10px;
 }
 
-/* 高亮行 */
 :deep(.highlight-row) {
   background-color: #ecf5ff !important;
 }
