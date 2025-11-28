@@ -24,7 +24,7 @@
 </template>
 
 <script setup>
-// 这里可以放置任何需要初始化的逻辑
+
 </script>
 
 <style scoped>
