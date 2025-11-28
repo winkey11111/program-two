@@ -37,6 +37,7 @@
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { getRecordsPaged, deleteRecord } from '../api'
 import { usePagination } from '@/composables/usePagination'
+import { useRouter } from 'vue-router'
 
 const {
   data: records,
@@ -47,6 +48,9 @@ const {
   load,
   onPageChange
 } = usePagination(getRecordsPaged)
+
+
+const router = useRouter()
 
 async function handleDeleteRecord(id) {
   try {
@@ -73,11 +77,12 @@ async function handleDeleteRecord(id) {
   }
 }
 
+// 👇 修改：使用 router 跳转
 function viewResult(id) {
-  console.log('查看结果:', id)
+  router.push(`/records/${id}/result`)
 }
 
 function viewSource(id) {
-  console.log('查看原始:', id)
+  router.push(`/records/${id}/source`)
 }
 </script>
