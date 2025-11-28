@@ -1,7 +1,5 @@
-<!-- RecordPreview.vue -->
 <template>
   <div class="preview-container">
-    <h2>{{ which === 'result' ? '识别结果' : '原始图像' }}</h2>
     <el-button @click="$router.back()">返回</el-button>
     <div style="margin-top: 12px;">
       <img :src="imageUrl" alt="预览" style="max-width: 100%; border: 1px solid #ddd;" />

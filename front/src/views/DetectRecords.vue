@@ -77,7 +77,6 @@ async function handleDeleteRecord(id) {
   }
 }
 
-// 👇 修改：使用 router 跳转
 function viewResult(id) {
   router.push(`/records/${id}/result`)
 }

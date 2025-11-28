@@ -1,6 +1,5 @@
 <template>
   <el-container class="app-container">
-    <!-- 导航栏 -->
     <el-header class="app-header">
       <el-menu 
         :default-active="$route.path" 
@@ -16,7 +15,6 @@
       </el-menu>
     </el-header>
 
-    <!-- 主内容区域 -->
     <el-main class="app-main">
       <router-view />
     </el-main>
@@ -28,6 +26,7 @@
 </script>
 
 <style scoped>
+
 .app-header {
   display: flex;
   justify-content: center;
@@ -92,7 +91,8 @@
   box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
   border-radius: 12px;
   margin: 20px auto;
-  max-width: 900px;
+  max-width: min(1000px, 95vw);
+  width: 100%; 
 }
 
 /* 导航栏 */
