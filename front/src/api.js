@@ -209,3 +209,11 @@ export async function getCPUStatus() {
   const res = await axios.get(`${BASE}/system/cpu`);
   return res.data;
 }
+
+/**
+ * 获取视频处理状态
+ */
+export async function getVideoStatus(videoId) {
+  const res = await axios.get(`${BASE}/video/${videoId}/status`);
+  return res.data; // 应返回 { status: 'processing' | 'completed', progress?: number }
+}

@@ -162,13 +162,15 @@
 </template>
 
 <script setup>
+import { ElMessage } from 'element-plus'
 import { ref, onMounted, onUnmounted } from 'vue'
 import { 
   uploadVideo, 
   getVideoDetections, 
   getVideoObjects, 
   toggleVideoBoxes, 
-  resetVideoBoxes 
+  resetVideoBoxes,
+  getVideoStatus
 } from '../api'
 import { VideoCamera } from '@element-plus/icons-vue'
 
@@ -185,6 +187,8 @@ const hiddenIds = ref([])
 const videoId = ref('')
 const isVideoPlaying = ref(false)
 const allHidden = ref(false)
+const pollingInterval = ref(null) // 轮询定时器
+const isPolling = ref(false)      // 防止重复轮询
 
 // 监听视频播放事件
 function onVideoPlay() {
@@ -223,27 +227,30 @@ function beforeUpload(fileRaw) {
   return false // 阻止自动上传
 }
 
-// 上传视频
+// 上传视频并启动状态轮询
 async function upload() {
-  if (!file.value) return
+  if (!file.value || isPolling.value) return
+
   try {
     const res = await uploadVideo(file.value)
     result.value = res
 
-    // 提取视频 ID
-    const match = res.result_url?.match(/\/([^\/]+\.mp4)$/)
+    // 提取 video_id（更可靠的方式）
+    const url = res.result_url // e.g. "/files/result/res_abc123.mp4"
+    const match = url?.match(/res_([a-z0-9]+)\.mp4$/)
     if (match) {
-      videoId.value = match[1].replace('.mp4', '').replace('res_', '')
+      videoId.value = match[1]
+    } else {
+      throw new Error('无法解析 video_id')
     }
 
     resultUrl.value = `http://localhost:8000${res.result_url}`
 
-    // 如果已完成，加载物体数据
-    if (res.status === 'completed') {
-      await loadVideoObjects()
-    }
+    // 启动轮询（无论 status 是什么，都轮询）
+    startPolling()
   } catch (error) {
     console.error('上传失败:', error)
+    isPolling.value = false
   }
 }
 
@@ -260,6 +267,41 @@ async function loadVideoObjects() {
   } catch (error) {
     console.error('获取物体列表失败:', error)
   }
+}
+
+// 启动轮询
+function startPolling() {
+  if (isPolling.value || !videoId.value) return
+  isPolling.value = true
+
+  pollingInterval.value = setInterval(async () => {
+    try {
+      const statusRes = await getVideoStatus(videoId.value)
+      result.value = { ...result.value, status: statusRes.status }
+
+      if (statusRes.status === 'completed') {
+        stopPolling()
+        await loadVideoObjects() // ✅ 状态完成后再加载物体
+      } else if (statusRes.status === 'failed') {
+        stopPolling()
+        ElMessage.error('视频处理失败，请重试')
+      }
+      // processing 状态：继续轮询
+    } catch (err) {
+      console.warn('轮询状态失败:', err)
+      // 可选：出错也停止轮询
+      // stopPolling()
+    }
+  }, 1500) // 每1.5秒查一次
+}
+
+// 停止轮询
+function stopPolling() {
+  if (pollingInterval.value) {
+    clearInterval(pollingInterval.value)
+    pollingInterval.value = null
+  }
+  isPolling.value = false
 }
 
 // 切换单个框可见性
@@ -345,8 +387,8 @@ async function getFrameDetections(frameIndex) {
   }
 }
 
-// 清空所有
 function clearResult() {
+  stopPolling() // 👈 新增
   if (previewVideoUrl.value) {
     URL.revokeObjectURL(previewVideoUrl.value)
     previewVideoUrl.value = ''
@@ -363,7 +405,6 @@ function clearResult() {
   isVideoPlaying.value = false
 }
 
-// 组件卸载时清理
 onUnmounted(() => {
   if (videoRef.value) {
     videoRef.value.pause()
@@ -371,6 +412,7 @@ onUnmounted(() => {
   if (previewVideoUrl.value) {
     URL.revokeObjectURL(previewVideoUrl.value)
   }
+  stopPolling() // 👈 新增
   isVideoPlaying.value = false
 })
 </script>

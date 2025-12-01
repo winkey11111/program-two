@@ -14,6 +14,7 @@ from ultralytics import YOLO
 import cv2
 import numpy as np
 import logging
+import subprocess
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +50,39 @@ def _is_safe_path(base_dir: str, path: str) -> bool:
         return False
 
 
+def convert_to_h264_compatible(input_path: str, output_path: str):
+    """
+    使用 ffmpeg 将视频转为 H.264 + AAC 的 MP4（网页兼容格式）
+    """
+    cmd = [
+        "ffmpeg",
+        "-i", input_path,
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        "-y",
+        output_path
+    ]
+    try:
+        logger.info(f"🔄 开始转码为 H.264 兼容格式: {output_path}")
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        logger.info("✅ 转码完成")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"❌ FFmpeg 转码失败: {e.stderr}")
+        raise HTTPException(status_code=500, detail="视频转码失败")
+    finally:
+        if os.path.exists(input_path):
+            try:
+                os.remove(input_path)
+                logger.info(f"🧹 已删除临时文件: {input_path}")
+            except OSError as e:
+                logger.warning(f"⚠️ 无法删除临时文件 {input_path}: {e}")
+
+
 # ========== 文件访问路由 ==========
 
 @router.get("/files/upload/{filename}")
@@ -75,7 +109,7 @@ async def get_result_file(filename: str):
 
 # ========== 视频处理核心函数 ==========
 
-def process_video_with_controls(input_path: str, output_path: str, conf_threshold: float = 0.5):
+def process_video_with_controls(video_id: str, input_path: str, output_path: str, conf_threshold: float = 0.5):
     if model is None:
         raise HTTPException(status_code=500, detail="模型未加载成功")
 
@@ -90,8 +124,9 @@ def process_video_with_controls(input_path: str, output_path: str, conf_threshol
     w, h = int(cap.get(3)), int(cap.get(4))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+    temp_output_path = output_path.replace(".mp4", "_temp.mp4")
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
+    out = cv2.VideoWriter(temp_output_path, fourcc, fps, (w, h))
 
     results = model.track(
         source=input_path,
@@ -110,6 +145,11 @@ def process_video_with_controls(input_path: str, output_path: str, conf_threshol
     frame_detections = []
 
     for frame_idx, result in enumerate(results):
+        # 🆕 实时更新进度
+        progress = frame_idx / total_frames if total_frames > 0 else 0
+        if video_id in video_detection_data:
+            video_detection_data[video_id]["progress"] = progress
+
         frame = result.orig_img.copy()
         frame_detection_data = {
             "frame_index": frame_idx,
@@ -165,19 +205,21 @@ def process_video_with_controls(input_path: str, output_path: str, conf_threshol
         if frame_idx % 100 == 0:
             logger.info(f"📊 处理进度: {frame_idx}/{total_frames} 帧")
 
-    processing_time = time.time() - start_time
     cap.release()
     out.release()
 
-    video_id = os.path.splitext(os.path.basename(output_path))[0]
+    convert_to_h264_compatible(temp_output_path, output_path)
+
+    # ✅ 处理完成，覆盖状态为 completed
     video_detection_data[video_id] = {
+        "status": "completed",
         "detections": frame_detections,
         "video_info": {
             "width": w,
             "height": h,
             "fps": fps,
             "total_frames": total_frames,
-            "processing_time": processing_time,
+            "processing_time": time.time() - start_time,
             "total_tracks": len(track_id_to_display_id)
         },
         "display_settings": {
@@ -191,7 +233,7 @@ def process_video_with_controls(input_path: str, output_path: str, conf_threshol
         "video_id": video_id,
         "total_frames": total_frames,
         "total_tracks": len(track_id_to_display_id),
-        "processing_time": processing_time,
+        "processing_time": time.time() - start_time,
     }
 
 
@@ -204,9 +246,11 @@ def regenerate_video_with_controls(video_id: str, hidden_ids: List[int],
     frame_detections = detection_data["detections"]
     video_info = detection_data["video_info"]
 
+    temp_output_path = output_path.replace(".mp4", "_temp.mp4")
+
     cap = cv2.VideoCapture(input_path)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(output_path, fourcc, video_info["fps"],
+    out = cv2.VideoWriter(temp_output_path, fourcc, video_info["fps"],
                           (video_info["width"], video_info["height"]))
 
     for frame_data in frame_detections:
@@ -227,6 +271,8 @@ def regenerate_video_with_controls(video_id: str, hidden_ids: List[int],
 
     cap.release()
     out.release()
+
+    convert_to_h264_compatible(temp_output_path, output_path)
 
     video_detection_data[video_id]["display_settings"] = {
         "visible_ids": [i for i in range(1, video_info["total_tracks"] + 1) if i not in hidden_ids],
@@ -281,7 +327,7 @@ def draw_frame_stats_with_controls(img, frame_idx, visible_count, total_count,
     cv2.rectangle(overlay, (0, 0), (width, 80), (0, 0, 0), -1)
     cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
     progress = (frame_idx / total_frames * 100) if total_frames > 0 else 0
-    stats_text = f"帧: {frame_idx} ({progress:.1f}%) | 可见: {visible_count}/{total_count}"
+    stats_text = f"frame: {frame_idx} ({progress:.1f}%) | aims: {visible_count}/{total_count}"
     cv2.putText(img, stats_text, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     control_text = f"隐藏框: {len(hidden_ids)}个"
     cv2.putText(img, control_text, (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 165, 0), 2)
@@ -324,9 +370,18 @@ async def detect_video(
         await out_file.write(content)
 
     def _bg_task():
+        video_id = os.path.splitext(out_name)[0]  # ✅ 提前定义 video_id
+
+        # ✅ 初始化处理状态
+        video_detection_data[video_id] = {
+            "status": "processing",
+            "progress": 0.0,
+            "detections": [],
+            "video_info": {}
+        }
+
         try:
-            result_info = process_video_with_controls(save_path, out_path, conf_threshold=conf)
-            video_id = result_info["video_id"]
+            result_info = process_video_with_controls(video_id, save_path, out_path, conf_threshold=conf)
 
             db = SessionLocal()
             try:
@@ -351,11 +406,8 @@ async def detect_video(
                 db.close()
         except Exception as e:
             logger.error(f"❌ 处理视频时出错: {e}")
-            if os.path.exists(save_path):
-                try:
-                    os.remove(save_path)
-                except OSError:
-                    pass
+            if video_id in video_detection_data:
+                video_detection_data[video_id]["status"] = "failed"
 
     if background_tasks:
         background_tasks.add_task(_bg_task)
@@ -500,3 +552,27 @@ async def reset_video_boxes(video_id: str):
         "message": "已重置所有框为可见状态",
         "visible_count": total_tracks
     }
+
+
+@router.get("/video/{video_id}/status")
+async def get_video_status(video_id: str):
+    _validate_video_id(video_id)
+    if video_id not in video_detection_data:
+        return {"status": "not_found"}
+
+    data = video_detection_data[video_id]
+    status = data.get("status", "unknown")
+
+    if status == "processing":
+        return {
+            "status": "processing",
+            "progress": round(data.get("progress", 0), 3)
+        }
+    elif status == "completed":
+        return {
+            "status": "completed",
+            "total_frames": len(data["detections"]),
+            "total_tracks": data["video_info"]["total_tracks"]
+        }
+    else:
+        return {"status": status}
