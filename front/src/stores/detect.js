@@ -8,8 +8,6 @@ export const useDetectStore = defineStore('detect', {
     originalImageUrl: '',
     resultUrl: '',
     result: null,
-
-
   }),
 
   actions: {

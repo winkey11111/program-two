@@ -34,14 +34,17 @@ except Exception as e:
     logger.error(f"❌ 模型加载失败: {e}")
     model = None
 
+# 全局内存缓存：video_id -> 处理状态/检测结果
 video_detection_data: Dict[str, Any] = {}
 
 
 def sanitize_filename(filename: str) -> str:
+    """清理文件名，仅保留安全字符"""
     return re.sub(r"[^a-zA-Z0-9_.-]", "_", filename)
 
 
 def _is_safe_path(base_dir: str, path: str) -> bool:
+    """防止路径遍历攻击"""
     try:
         base_real = os.path.realpath(base_dir)
         path_real = os.path.realpath(path)
@@ -53,6 +56,7 @@ def _is_safe_path(base_dir: str, path: str) -> bool:
 def convert_to_h264_compatible(input_path: str, output_path: str):
     """
     使用 ffmpeg 将视频转为 H.264 + AAC 的 MP4（网页兼容格式）
+    并删除原始临时文件
     """
     cmd = [
         "ffmpeg",
@@ -121,7 +125,7 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
         raise HTTPException(status_code=500, detail="无法打开视频文件")
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 25
-    w, h = int(cap.get(3)), int(cap.get(4))
+    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     temp_output_path = output_path.replace(".mp4", "_temp.mp4")
@@ -145,7 +149,7 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
     frame_detections = []
 
     for frame_idx, result in enumerate(results):
-        # 🆕 实时更新进度
+        # 实时更新进度
         progress = frame_idx / total_frames if total_frames > 0 else 0
         if video_id in video_detection_data:
             video_detection_data[video_id]["progress"] = progress
@@ -210,7 +214,7 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
 
     convert_to_h264_compatible(temp_output_path, output_path)
 
-    # ✅ 处理完成，覆盖状态为 completed
+    # 处理完成，覆盖状态为 completed
     video_detection_data[video_id] = {
         "status": "completed",
         "detections": frame_detections,
@@ -361,6 +365,7 @@ async def detect_video(
     timestamp = int(time.time() * 1000)
     save_name = f"{timestamp}_{name_no_ext}{ext}"
     out_name = f"res_{timestamp}_{name_no_ext}.mp4"
+    video_id = f"res_{timestamp}_{name_no_ext}"  # ✅ 统一 video_id 定义
 
     save_path = os.path.join(UPLOAD_DIR, save_name)
     out_path = os.path.join(RESULT_DIR, out_name)
@@ -370,9 +375,7 @@ async def detect_video(
         await out_file.write(content)
 
     def _bg_task():
-        video_id = os.path.splitext(out_name)[0]  # ✅ 提前定义 video_id
-
-        # ✅ 初始化处理状态
+        # 初始化处理状态
         video_detection_data[video_id] = {
             "status": "processing",
             "progress": 0.0,
@@ -416,6 +419,7 @@ async def detect_video(
 
     return {
         "status": "processing",
+        "video_id": video_id,
         "result_url": f"/api/files/result/{out_name}",
         "message": "视频正在处理中，处理完成后可控制框的显示",
         "features": {

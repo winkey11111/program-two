@@ -169,7 +169,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* 样式部分完全不变，不用改 */
 .record-preview {
   padding: 20px;
   max-width: 1200px;
