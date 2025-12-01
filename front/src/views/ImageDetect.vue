@@ -4,6 +4,7 @@
       <h2 style="margin: 0;">图片识别</h2>
     </div>
 
+    <!-- 👇 主操作栏：新增“查看结果图”按钮 -->
     <div class="upload-actions">
       <el-upload
         :before-upload="beforeUpload"
@@ -24,13 +25,24 @@
       <el-button @click="handleClear" class="ml-8">
         清空
       </el-button>
+
+      <!-- ✅ 新增：放在清空右边 -->
+      <el-button
+        v-if="store.resultUrl"
+        size="small"
+        type="primary"
+        @click="openResultImage"
+        class="ml-8"
+      >
+        查看结果图
+      </el-button>
     </div>
 
     <div class="outer-frame">
       <div class="result-layout">
-        <!-- 图像预览区 -->
+        <!-- 图像预览区（不再包含按钮） -->
         <div class="preview-section">
-          <h3>图像预览</h3>
+          <h3>图像预览</h3> <!-- 👈 简化标题，无按钮 -->
           <div class="inner-frame" style="position: relative; overflow: hidden;">
             <img
               v-if="store.originalImageUrl"
@@ -102,7 +114,7 @@
       </div>
     </div>
 
-    <!-- 大图预览 -->
+    <!-- 大图预览（原图） -->
     <el-dialog
       v-model="imageDialogVisible"
       title="图片预览"
@@ -116,6 +128,25 @@
           alt="放大预览"
           class="dialog-image"
         />
+      </div>
+    </el-dialog>
+
+    <!-- ✅ 新增：结果图弹窗 -->
+    <el-dialog
+      v-model="resultImageDialogVisible"
+      title="识别结果图"
+      width="80%"
+      top="5vh"
+      :close-on-click-modal="true"
+    >
+      <div class="dialog-image-container">
+        <img
+          v-if="store.resultUrl"
+          :src="store.resultUrl"
+          alt="识别结果图"
+          class="dialog-image"
+        />
+        <el-empty v-else description="结果图未生成" />
       </div>
     </el-dialog>
   </div>
@@ -134,6 +165,9 @@ const currentImageUrl = ref('')
 const previewImageRef = ref(null)
 const overlayCanvasRef = ref(null)
 const highlightId = ref(null)
+
+// 新增：控制结果图弹窗
+const resultImageDialogVisible = ref(false)
 
 // 全选控制
 const allVisible = ref(true)
@@ -167,7 +201,7 @@ watch(
   { deep: true }
 )
 
-// 👇 新增：监听 originalImageUrl 清空时，主动清空 canvas
+// 监听 originalImageUrl 清空时，主动清空 canvas
 watch(
   () => store.originalImageUrl,
   (newUrl) => {
@@ -191,6 +225,7 @@ async function upload() {
   try {
     const data = await uploadImage(store.imageFile)
     store.result = data
+    store.resultUrl = data.result_url // 👈 假设后端返回 result_url
 
     if (store.result.detections) {
       store.result.detections.forEach(det => {
@@ -216,7 +251,6 @@ function clearCanvas() {
   if (canvas) {
     const ctx = canvas.getContext('2d')
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    // 重置 canvas 尺寸为 0，避免残留尺寸影响下次绘制
     canvas.width = 0
     canvas.height = 0
   }
@@ -293,9 +327,15 @@ function toggleAllVisible(visible) {
     drawDetections()
   }
 }
+
+// ✅ 新增：打开结果图
+function openResultImage() {
+  resultImageDialogVisible.value = true
+}
 </script>
 
 <style scoped>
+/* 样式保持不变 */
 .image-detect-container {
   padding: 20px;
 }

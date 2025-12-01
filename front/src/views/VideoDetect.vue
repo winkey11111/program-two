@@ -26,12 +26,14 @@
           <h3>视频预览</h3>
           <div class="inner-frame" style="position: relative; overflow: hidden;">
             <video
-              v-if="result?.status === 'completed'"
+              v-if="previewVideoUrl || (result?.status === 'completed')"
               ref="videoRef"
-              :src="resultUrl"
+              :src="result?.status === 'completed' ? resultUrl : previewVideoUrl"
               controls
               class="preview-video"
               @timeupdate="onTimeUpdate"
+              @play="onVideoPlay"
+              @pause="onVideoPause"
             ></video>
             <canvas
               v-if="result?.status === 'completed'"
@@ -40,7 +42,7 @@
             ></canvas>
 
             <!-- 占位提示 -->
-            <div v-if="!result || result.status !== 'completed'" class="empty-placeholder">
+            <div v-if="!previewVideoUrl && (!result || result.status !== 'completed')" class="empty-placeholder">
               <el-icon class="empty-icon"><VideoCamera /></el-icon>
               <p>{{ file ? '视频处理中…' : '请上传视频' }}</p>
             </div>
@@ -49,27 +51,103 @@
 
         <!-- 检测结果表格 -->
         <div class="detection-section">
-          <h3>识别结果{{ currentFrameIndex >= 0 ? `（第 ${currentFrameIndex} 帧）` : '' }}</h3>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h3>识别结果{{ currentFrameIndex >= 0 ? `（第 ${currentFrameIndex} 帧）` : '' }}</h3>
+            <!-- 控制按钮组 -->
+            <div class="control-buttons">
+              <el-button
+                v-if="result?.status === 'completed' && allObjects.length > 0"
+                size="small"
+                @click="toggleAllBoxes"
+              >
+                {{ allHidden ? '显示全部' : '隐藏全部' }}
+              </el-button>
+              <el-button
+                v-if="result?.status === 'completed' && allObjects.length > 0"
+                size="small"
+                @click="resetBoxes"
+              >
+                重置显示
+              </el-button>
+            </div>
+          </div>
           <div class="inner-frame">
-            <div v-if="result?.status === 'completed' && currentFrameObjects?.length">
+            <div v-if="result?.status === 'completed' && allObjects?.length">
               <el-table
                 :data="currentFrameObjects"
                 style="width: 100%"
                 table-layout="fixed"
-                height="340"
+                height="300"
               >
-                <el-table-column prop="class" label="类别" width="100" />
-                <el-table-column label="置信度" width="100">
+                <el-table-column prop="class" label="类别" width="80" />
+                <el-table-column label="ID" width="60">
                   <template #default="{ row }">
-                    {{ (row.conf * 100).toFixed(1) }}%
+                    {{ row.id }}
                   </template>
                 </el-table-column>
-                <el-table-column label="边界框" width="260" show-overflow-tooltip>
+                <el-table-column label="置信度" width="80">
+                  <template #default="{ row }">
+                    {{ (row.confidence * 100).toFixed(1) }}%
+                  </template>
+                </el-table-column>
+                <el-table-column label="边界框" width="160" show-overflow-tooltip>
                   <template #default="{ row }">
                     {{ row.bbox?.map(v => Math.round(v)).join(', ') }}
                   </template>
                 </el-table-column>
+                <el-table-column label="操作" width="80">
+                  <template #default="{ row }">
+                    <el-switch
+                      v-model="row.visible"
+                      inline-prompt
+                      size="small"
+                      active-text="显"
+                      inactive-text="隐"
+                      @change="(val) => toggleBoxVisibility(row.id, val)"
+                    />
+                  </template>
+                </el-table-column>
               </el-table>
+              
+              <!-- 所有物体列表 -->
+              <div class="all-objects-section">
+                <h4>所有检测物体</h4>
+                <el-table
+                  :data="allObjects"
+                  style="width: 100%"
+                  table-layout="fixed"
+                  height="200"
+                >
+                  <el-table-column label="ID" width="60">
+                    <template #default="{ row }">
+                      {{ row.id }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="class" label="类别" width="80" />
+                  <el-table-column label="出现次数" width="80">
+                    <template #default="{ row }">
+                      {{ row.appearances }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="首次出现" width="100">
+                    <template #default="{ row }">
+                      {{ formatTimestamp(row.first_seen) }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="80">
+                    <template #default="{ row }">
+                      <el-switch
+                        v-model="row.visible"
+                        inline-prompt
+                        size="small"
+                        active-text="显"
+                        inactive-text="隐"
+                        @change="(val) => toggleBoxVisibility(row.id, val)"
+                      />
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </div>
             </div>
             <el-empty
               v-else
@@ -84,52 +162,217 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { uploadVideo } from '../api'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { 
+  uploadVideo, 
+  getVideoDetections, 
+  getVideoObjects, 
+  toggleVideoBoxes, 
+  resetVideoBoxes 
+} from '../api'
 import { VideoCamera } from '@element-plus/icons-vue'
 
 const file = ref(null)
+const previewVideoUrl = ref('') // 本地预览 URL
 const result = ref(null)
 const resultUrl = ref('')
 const videoRef = ref(null)
 const overlayCanvasRef = ref(null)
-const currentFrameObjects = ref(null)
+const currentFrameObjects = ref([])
 const currentFrameIndex = ref(-1)
+const allObjects = ref([])
+const hiddenIds = ref([])
+const videoId = ref('')
+const isVideoPlaying = ref(false)
+const allHidden = ref(false)
 
-function beforeUpload(fileRaw) {
-  file.value = fileRaw
-  result.value = null
-  currentFrameObjects.value = null
-  currentFrameIndex.value = -1
-  return false
+// 监听视频播放事件
+function onVideoPlay() {
+  isVideoPlaying.value = true
+  updateDetectionData()
 }
 
+// 监听视频暂停事件
+function onVideoPause() {
+  isVideoPlaying.value = false
+}
+
+// 定期更新检测数据（用于流畅显示）
+function updateDetectionData() {
+  if (!isVideoPlaying.value) return
+  onTimeUpdate()
+  setTimeout(updateDetectionData, 200)
+}
+
+// 选择文件时创建本地预览
+function beforeUpload(fileRaw) {
+  file.value = fileRaw
+  previewVideoUrl.value = URL.createObjectURL(fileRaw)
+
+  // 重置状态
+  result.value = null
+  resultUrl.value = ''
+  currentFrameObjects.value = []
+  currentFrameIndex.value = -1
+  allObjects.value = []
+  hiddenIds.value = []
+  videoId.value = ''
+  allHidden.value = false
+  isVideoPlaying.value = false
+
+  return false // 阻止自动上传
+}
+
+// 上传视频
 async function upload() {
   if (!file.value) return
   try {
     const res = await uploadVideo(file.value)
     result.value = res
+
+    // 提取视频 ID
+    const match = res.result_url?.match(/\/([^\/]+\.mp4)$/)
+    if (match) {
+      videoId.value = match[1].replace('.mp4', '').replace('res_', '')
+    }
+
     resultUrl.value = `http://localhost:8000${res.result_url}`
+
+    // 如果已完成，加载物体数据
+    if (res.status === 'completed') {
+      await loadVideoObjects()
+    }
   } catch (error) {
     console.error('上传失败:', error)
   }
 }
 
+// 加载所有检测物体
+async function loadVideoObjects() {
+  if (!videoId.value) return
+  try {
+    const res = await getVideoObjects(videoId.value)
+    allObjects.value = res.objects.map(obj => ({
+      ...obj,
+      visible: true
+    }))
+    updateHiddenIds()
+  } catch (error) {
+    console.error('获取物体列表失败:', error)
+  }
+}
+
+// 切换单个框可见性
+function toggleBoxVisibility(boxId, visible) {
+  const obj = allObjects.value.find(o => o.id === boxId)
+  if (obj) {
+    obj.visible = visible
+    updateHiddenIds()
+    updateVideoBoxes()
+  }
+}
+
+// 更新隐藏 ID 列表
+function updateHiddenIds() {
+  hiddenIds.value = allObjects.value
+    .filter(obj => !obj.visible)
+    .map(obj => obj.id)
+  allHidden.value = hiddenIds.value.length === allObjects.value.length
+}
+
+// 通知后端更新视频框（可选，若后端支持动态渲染）
+async function updateVideoBoxes() {
+  if (!videoId.value) return
+  try {
+    await toggleVideoBoxes(videoId.value, hiddenIds.value, false)
+  } catch (error) {
+    console.error('更新视频框失败:', error)
+  }
+}
+
+// 切换全部显示/隐藏
+function toggleAllBoxes() {
+  const newValue = !allHidden.value
+  allObjects.value.forEach(obj => {
+    obj.visible = newValue
+  })
+  updateHiddenIds()
+  updateVideoBoxes()
+}
+
+// 重置为全部显示
+async function resetBoxes() {
+  try {
+    await resetVideoBoxes(videoId.value)
+    allObjects.value.forEach(obj => {
+      obj.visible = true
+    })
+    updateHiddenIds()
+  } catch (error) {
+    console.error('重置框显示失败:', error)
+  }
+}
+
+// 格式化时间戳（秒）
+function formatTimestamp(timestamp) {
+  return `${timestamp.toFixed(2)}s`
+}
+
+// 视频时间更新时获取当前帧检测
+function onTimeUpdate() {
+  if (!videoRef.value || !videoId.value) return
+
+  const currentTime = videoRef.value.currentTime
+  const fps = 25 // 实际应从后端获取，此处假设
+  const frameIndex = Math.floor(currentTime * fps)
+  currentFrameIndex.value = frameIndex
+
+  getFrameDetections(frameIndex)
+}
+
+// 获取指定帧的检测数据
+async function getFrameDetections(frameIndex) {
+  if (!videoId.value) return
+  try {
+    const res = await getVideoDetections(videoId.value, frameIndex)
+    const visibleDetections = res.detections.filter(d => !hiddenIds.value.includes(d.id))
+    currentFrameObjects.value = visibleDetections.map(d => ({
+      ...d,
+      visible: !hiddenIds.value.includes(d.id)
+    }))
+  } catch (error) {
+    console.error('获取帧检测数据失败:', error)
+  }
+}
+
+// 清空所有
 function clearResult() {
+  if (previewVideoUrl.value) {
+    URL.revokeObjectURL(previewVideoUrl.value)
+    previewVideoUrl.value = ''
+  }
   file.value = null
   result.value = null
-  currentFrameObjects.value = null
+  resultUrl.value = ''
+  currentFrameObjects.value = []
   currentFrameIndex.value = -1
+  allObjects.value = []
+  hiddenIds.value = []
+  videoId.value = ''
+  allHidden.value = false
+  isVideoPlaying.value = false
 }
 
-function onTimeUpdate() {
-
-  // 示例：假设后端返回 frames: [{ index, time, objects }, ...]
-  // const currentTime = videoRef.value?.currentTime || 0
-  // const frame = findClosestFrame(result.value.frames, currentTime)
-  // currentFrameIndex.value = frame?.index || -1
-  // currentFrameObjects.value = frame?.objects || []
-}
+// 组件卸载时清理
+onUnmounted(() => {
+  if (videoRef.value) {
+    videoRef.value.pause()
+  }
+  if (previewVideoUrl.value) {
+    URL.revokeObjectURL(previewVideoUrl.value)
+  }
+  isVideoPlaying.value = false
+})
 </script>
 
 <style scoped>
@@ -164,7 +407,6 @@ function onTimeUpdate() {
   text-decoration: none;
 }
 
-/* 复用图片识别的样式结构 */
 .outer-frame {
   width: 100%;
   min-height: 450px;
@@ -194,6 +436,12 @@ h3 {
   margin: 0 0 8px 0;
   font-size: 16px;
   color: #303133;
+}
+
+h4 {
+  margin: 10px 0 8px 0;
+  font-size: 14px;
+  color: #606266;
 }
 
 .inner-frame {
@@ -236,7 +484,30 @@ h3 {
   padding: 10px;
 }
 
+.all-objects-section {
+  margin-top: 16px;
+}
+
+.control-buttons {
+  display: flex;
+  gap: 8px;
+}
+
 :deep(.el-empty) {
   margin: 60px 0;
+}
+
+:deep(.el-table) {
+  & .cell {
+    padding: 0 4px !important;
+  }
+  
+  & th {
+    padding: 4px 0 !important;
+  }
+  
+  & td {
+    padding: 4px 0 !important;
+  }
 }
 </style>

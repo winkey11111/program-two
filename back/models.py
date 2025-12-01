@@ -1,3 +1,4 @@
+# models.py
 from sqlalchemy import Column, Integer, String, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import JSON
@@ -12,5 +13,6 @@ class DetectRecord(Base):
     filename = Column(String(255))
     source_path = Column(String(512))
     result_path = Column(String(512))
+    result_url = Column(String(512))  # ← 新增这一行！
     objects = Column(JSON)  # store list of detections
     detect_time = Column(DateTime, default=datetime.utcnow)

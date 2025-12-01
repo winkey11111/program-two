@@ -9,7 +9,7 @@ export const useDetectStore = defineStore('detect', {
     resultUrl: '',
     result: null,
 
-    // 可扩展：视频、摄像头状态...
+
   }),
 
   actions: {
