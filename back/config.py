@@ -10,7 +10,7 @@ UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
 RESULT_DIR = os.path.join(BASE_DIR, "static", "results")
 CAMERA_DIR = os.path.join(BASE_DIR, "static", "camera_records")
 MODEL_PATH = os.path.join(BASE_DIR, "yolov8", "best.pt")
-
+TRANSCODED_DIR = os.path.join(BASE_DIR, "static", "transcoded")
 # 自动创建目录
 for directory in [UPLOAD_DIR, RESULT_DIR, CAMERA_DIR]:
     os.makedirs(directory, exist_ok=True)
