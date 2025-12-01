@@ -7,19 +7,37 @@ from fastapi.responses import FileResponse
 import os
 import json
 from config import RESULT_DIR, UPLOAD_DIR, CAMERA_DIR
+import re
 from typing import Optional
 
 router = APIRouter()
 
 
+def _make_safe_url(filepath: Optional[str], base_dir: str, prefix: str) -> Optional[str]:
+    """生成安全的文件访问 URL，防止路径遍历"""
+    if not filepath or not os.path.exists(filepath):
+        return None
+    try:
+        real_path = os.path.realpath(filepath)
+        real_base = os.path.realpath(base_dir)
+        if not real_path.startswith(real_base):
+            return None
+        filename = os.path.basename(filepath)
+        if re.match(r"^[^\x00/\x00]+$", filename):  # 禁止 / 和空字符即可
+            return f"{prefix}/{filename}"
+    except Exception:
+        return None
+    return None
+
+
 @router.get("/records/list")
 def list_records(
-        page: int = Query(1, ge=1),
-        limit: int = Query(20, ge=1, le=100),
-        type: str = None
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    type: str = None
 ):
     """获取检测记录列表"""
-    db = SessionLocal()  # 修复：应该是 SessionLocal()
+    db = SessionLocal()
     try:
         query = db.query(DetectRecord)
         if type:
@@ -38,28 +56,21 @@ def list_records(
 
         data = []
         for r in records:
-            # 解析检测结果统计信息
-            objects_data = []
+            detection_count = 0
             if r.objects:
                 try:
-                    objects_data = json.loads(r.objects)
-                    if isinstance(objects_data, list):
-                        # 统计检测目标数量
-                        detection_count = len(objects_data)
-                    else:
-                        detection_count = 0
+                    obj = json.loads(r.objects)
+                    detection_count = len(obj) if isinstance(obj, list) else 0
                 except:
-                    detection_count = 0
-            else:
-                detection_count = 0
+                    pass
 
             record_info = {
                 "id": r.id,
                 "type": r.type,
                 "filename": r.filename,
-                "detect_time": r.detect_time.isoformat() if r.detect_time else None,  # 修复：添加了缺失的括号和引号
+                "detect_time": r.detect_time.isoformat() if r.detect_time else None,
                 "detection_count": detection_count,
-                "has_result": os.path.exists(r.result_path) if r.result_path else False
+                "has_result": bool(r.result_path and os.path.exists(r.result_path))
             }
             data.append(record_info)
 
@@ -77,14 +88,13 @@ def list_records(
 
 @router.get("/records/{record_id}")
 def get_record_detail(record_id: int):
-    """获取单条记录的详细信息"""
+    """获取单条记录详情（含 source_url 和 result_url）"""
     db = SessionLocal()
     try:
         record = db.query(DetectRecord).filter(DetectRecord.id == record_id).first()
         if not record:
             raise HTTPException(status_code=404, detail="记录不存在")
 
-        # 解析检测结果
         objects_data = []
         if record.objects:
             try:
@@ -92,21 +102,20 @@ def get_record_detail(record_id: int):
             except:
                 objects_data = []
 
-        # 检查文件是否存在
-        source_exists = os.path.exists(record.source_path) if record.source_path else False
-        result_exists = os.path.exists(record.result_path) if record.result_path else False
+        source_url = _make_safe_url(record.source_path, UPLOAD_DIR, "/files/upload")
+        result_url = _make_safe_url(record.result_path, RESULT_DIR, "/files/result")
 
         return {
             "id": record.id,
             "type": record.type,
             "filename": record.filename,
             "detect_time": record.detect_time.isoformat() if record.detect_time else None,
-            "source_path": record.source_path,
-            "result_path": record.result_path,
+            "source_url": source_url,
+            "result_url": result_url,  # ← 现在是 /files/result/xxx
             "objects": objects_data,
-            "file_status": {  # 修复：添加了缺失的引号
-                "source_exists": source_exists,
-                "result_exists": result_exists
+            "file_status": {
+                "source_exists": source_url is not None,
+                "result_exists": result_url is not None
             }
         }
     except HTTPException:
@@ -119,30 +128,24 @@ def get_record_detail(record_id: int):
 
 @router.get("/records/file/{record_id}")
 def get_record_file(
-        record_id: int,
-        which: str = "result",
-        check_exists: bool = True
+    record_id: int,
+    which: str = "result",
+    check_exists: bool = True
 ):
-    """获取记录对应的文件"""
+    """获取记录对应的原始或结果文件（兼容旧接口）"""
     db = SessionLocal()
     try:
         record = db.query(DetectRecord).filter(DetectRecord.id == record_id).first()
         if not record:
             raise HTTPException(status_code=404, detail="记录不存在")
 
-        if which == "result":
-            file_path = record.result_path
-        elif which == "source":
-            file_path = record.source_path
-        else:
-            raise HTTPException(status_code=400, detail="which参数必须是'result'或'source'")
+        file_path = record.result_path if which == "result" else record.source_path
+        if which not in ["result", "source"] or not file_path:
+            raise HTTPException(status_code=400, detail="无效的 which 参数或文件路径")
 
-        if not file_path:
-            raise HTTPException(status_code=404, detail="文件路径不存在")
-
-        # 确保文件路径在允许的目录内
-        allowed_dirs = [RESULT_DIR, UPLOAD_DIR, CAMERA_DIR]
-        if not any(file_path.startswith(str(dir_path)) for dir_path in allowed_dirs if dir_path):
+        allowed_dirs = [d for d in [RESULT_DIR, UPLOAD_DIR, CAMERA_DIR] if d]
+        real_file = os.path.realpath(file_path)
+        if not any(real_file.startswith(os.path.realpath(d)) for d in allowed_dirs):
             raise HTTPException(status_code=403, detail="文件访问被拒绝")
 
         if check_exists and not os.path.exists(file_path):
@@ -159,46 +162,37 @@ def get_record_file(
 
 @router.delete("/records/{record_id}")
 def delete_record(record_id: int, delete_files: bool = False):
-    """删除记录（可选删除文件）"""
+    """删除记录（可选删除物理文件）"""
     db = SessionLocal()
     try:
         record = db.query(DetectRecord).filter(DetectRecord.id == record_id).first()
         if not record:
             raise HTTPException(status_code=404, detail="记录不存在")
 
-        # 记录文件路径用于后续删除
         file_paths = []
         if record.source_path:
-            file_paths.append(record.source_path)  # 修复：添加了缺失的括号
+            file_paths.append(record.source_path)
         if record.result_path and record.result_path != record.source_path:
             file_paths.append(record.result_path)
 
-        # 删除数据库记录
         db.delete(record)
         db.commit()
 
-        # 可选删除文件
+        deleted_files = []
         if delete_files:
-            deleted_files = []
-            for file_path in file_paths:
-                if os.path.exists(file_path):
+            for fp in file_paths:
+                if os.path.exists(fp):
                     try:
-                        os.remove(file_path)
-                        deleted_files.append(file_path)
-                    except Exception as e:
-                        # 文件删除失败不影响主要操作
-                        pass
+                        os.remove(fp)
+                        deleted_files.append(fp)
+                    except OSError:
+                        pass  # 忽略删除失败
 
-            return {
-                "message": "记录删除成功",
-                "deleted_files": deleted_files,
-                "record_id": record_id
-            }
-        else:
-            return {
-                "message": "记录删除成功（文件保留）",
-                "record_id": record_id
-            }
+        return {
+            "message": "记录删除成功",
+            "record_id": record_id,
+            "deleted_files": deleted_files if delete_files else []
+        }
     except HTTPException:
         db.rollback()
         raise
