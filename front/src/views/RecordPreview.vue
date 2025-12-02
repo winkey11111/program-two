@@ -39,8 +39,7 @@
         preload="metadata"
       >
         您的浏览器不支持视频播放
-      </video>
-      <div v-else class="unsupported-type">
+      </video>      <div v-else class="unsupported-type">
         <el-icon color="#909399"><InfoFilled /></el-icon>
         <span>不支持的文件类型：{{ record.type }}</span>
       </div>
