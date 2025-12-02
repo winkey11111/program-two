@@ -9,7 +9,7 @@
   "dependencies": {
     "vue": "^3.3.4",
     "axios": "^1.6.1",
-    "element-plus": "^3.3.11"
+    "element-plus": "^2.11.2"
   },
   "devDependencies": {
     "vite": "^5.4.21",
