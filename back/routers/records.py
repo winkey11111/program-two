@@ -1,4 +1,3 @@
-# backend/routers/records.py
 from fastapi import APIRouter, HTTPException, Query
 from db import SessionLocal
 from models import DetectRecord
@@ -23,7 +22,7 @@ def _make_safe_url(filepath: Optional[str], base_dir: str, prefix: str) -> Optio
         if not real_path.startswith(real_base):
             return None
         filename = os.path.basename(filepath)
-        if re.match(r"^[^\x00/\x00]+$", filename):  # 禁止 / 和空字符即可
+        if re.match(r"^[^\x00/\x00]+$", filename):
             return f"{prefix}/{filename}"
     except Exception:
         return None

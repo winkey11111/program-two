@@ -47,7 +47,6 @@ def run_frontend():
 
     node_modules = frontend_dir / "node_modules"
 
-    # 检查是否能找到 npm.cmd
     npm_cmd = shutil.which("npm.cmd") or shutil.which("npm")
     if npm_cmd is None:
         print("[前端错误] 找不到 npm，请确保 Node.js 已正确安装并加入 PATH")

@@ -4,7 +4,6 @@
       <h2 style="margin: 0;">图片识别</h2>
     </div>
 
-    <!-- 👇 主操作栏：新增“查看结果图”按钮 -->
     <div class="upload-actions">
       <el-upload
         :before-upload="beforeUpload"
@@ -26,7 +25,6 @@
         清空
       </el-button>
 
-      <!-- ✅ 新增：放在清空右边 -->
       <el-button
         v-if="store.resultUrl"
         size="small"
@@ -40,7 +38,6 @@
 
     <div class="outer-frame">
       <div class="result-layout">
-        <!-- 图像预览区（不再包含按钮） -->
         <div class="preview-section">
           <h3>图像预览</h3> <!-- 👈 简化标题，无按钮 -->
           <div class="inner-frame" style="position: relative; overflow: hidden;">
@@ -114,7 +111,6 @@
       </div>
     </div>
 
-    <!-- 大图预览（原图） -->
     <el-dialog
       v-model="imageDialogVisible"
       title="图片预览"
@@ -131,7 +127,6 @@
       </div>
     </el-dialog>
 
-    <!-- ✅ 新增：结果图弹窗 -->
     <el-dialog
       v-model="resultImageDialogVisible"
       title="识别结果图"
@@ -166,7 +161,6 @@ const previewImageRef = ref(null)
 const overlayCanvasRef = ref(null)
 const highlightId = ref(null)
 
-// 新增：控制结果图弹窗
 const resultImageDialogVisible = ref(false)
 
 // 全选控制
@@ -225,7 +219,7 @@ async function upload() {
   try {
     const data = await uploadImage(store.imageFile)
     store.result = data
-    store.resultUrl = data.result_url // 👈 假设后端返回 result_url
+    store.resultUrl = data.result_url
 
     if (store.result.detections) {
       store.result.detections.forEach(det => {
@@ -328,7 +322,7 @@ function toggleAllVisible(visible) {
   }
 }
 
-// ✅ 新增：打开结果图
+
 function openResultImage() {
   resultImageDialogVisible.value = true
 }

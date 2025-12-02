@@ -57,7 +57,7 @@ import {
   getVideoSourceUrl
 } from '../api'
 
-// 注意：不再导入任何图标
+
 import { ElImage, ElPageHeader, ElRadioGroup, ElRadio } from 'element-plus'
 
 const props = defineProps({
