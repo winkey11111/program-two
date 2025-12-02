@@ -1,4 +1,3 @@
-# backend/routers/video.py
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Query
 from fastapi.responses import FileResponse
 import os
@@ -34,7 +33,7 @@ except Exception as e:
     logger.error(f"❌ 模型加载失败: {e}")
     model = None
 
-# 全局内存缓存：video_id -> 处理状态/检测结果
+
 video_detection_data: Dict[str, Any] = {}
 
 

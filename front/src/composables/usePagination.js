@@ -1,4 +1,3 @@
-// src/composables/usePagination.js
 import { ref } from 'vue'
 
 export function usePagination(fetchFn) {

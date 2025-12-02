@@ -1,9 +1,7 @@
-// stores/detect.js
 import { defineStore } from 'pinia'
 
 export const useDetectStore = defineStore('detect', {
   state: () => ({
-    // 图片识别相关状态
     imageFile: null,
     originalImageUrl: '',
     resultUrl: '',
@@ -11,7 +9,6 @@ export const useDetectStore = defineStore('detect', {
   }),
 
   actions: {
-    // 清空图片识别状态
     clearImageResult() {
       this.imageFile = null
       this.originalImageUrl = ''

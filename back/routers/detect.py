@@ -1,4 +1,3 @@
-# backend/routers/detect.py
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 import os
@@ -18,15 +17,13 @@ router = APIRouter()
 model = YOLO(MODEL_PATH)
 
 
-# 初始化数据库表，并尝试添加缺失的 result_url 列（SQLite 兼容）
+# 初始化数据库表
 def init_db():
     from db import engine
     from sqlalchemy import inspect, text
 
-    # 创建表（如果不存在）
     Base.metadata.create_all(bind=engine)
 
-    # 检查并添加 result_url 列（仅 SQLite）
     inspector = inspect(engine)
     columns = [col["name"] for col in inspector.get_columns("detect_record")]
     if "result_url" not in columns:

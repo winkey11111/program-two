@@ -1,4 +1,3 @@
-// router/index.js
 import { createRouter, createWebHistory } from 'vue-router'
 import ImageDetect from './views/ImageDetect.vue'
 import VideoDetect from './views/VideoDetect.vue'

@@ -20,6 +20,6 @@ for directory in [UPLOAD_DIR, RESULT_DIR, CAMERA_DIR]:
 # -------------------------------
 # SQLite 数据库存放路径
 DB_DIR = os.path.join(BASE_DIR, "db")
-os.makedirs(DB_DIR, exist_ok=True)  # 确保 db 目录存在
+os.makedirs(DB_DIR, exist_ok=True)
 
 DATABASE_URL = f"sqlite:///{os.path.join(DB_DIR, 'example.db')}"
