@@ -16,8 +16,8 @@
 
     <!-- 处理中进度提示 -->
     <div v-if="result && result.status === 'processing'" class="processing-banner">
-      视频处理中：{{ progress }}%
-      <el-progress :percentage="progress" :stroke-width="4" style="margin-top: 8px;" />
+      视频处理中：{{ store.progress }}%
+      <el-progress :percentage="store.progress" :stroke-width="4" style="margin-top: 8px;" />
     </div>
 
     <!-- 主内容区：始终显示双栏 -->
@@ -142,7 +142,6 @@ const allObjects = ref([])
 const videoId = ref('')
 const pollingInterval = ref(null)
 const isPolling = ref(false)
-const progress = ref(0)
 
 const videoInfo = ref({ fps: 25, total_frames: 0 })
 
@@ -186,7 +185,13 @@ function beforeUpload(fileRaw) {
   file.value = fileRaw
   previewVideoUrl.value = URL.createObjectURL(fileRaw)
 
-  store.videoFile = fileRaw
+  // 👇 保存可持久化的元信息
+  store.videoFileMeta = {
+    name: fileRaw.name,
+    size: fileRaw.size,
+    type: fileRaw.type,
+    lastModified: fileRaw.lastModified
+  }
 
   // 重置状态
   result.value = null
@@ -195,7 +200,7 @@ function beforeUpload(fileRaw) {
   currentFrameIndex.value = -1
   allObjects.value = []
   videoId.value = ''
-  progress.value = 0
+  store.progress = 0 // ✅ 使用 store.progress
 
   return false
 }
@@ -215,6 +220,7 @@ async function upload() {
     store.videoResult = res
     store.rawResultUrl = rawResultUrl.value
     store.videoId = videoId.value
+    store.progress = 0 // ✅ 初始化进度
 
     startPolling()
   } catch (error) {
@@ -233,11 +239,12 @@ async function startPolling() {
       const statusRes = await getVideoStatus(videoId.value)
 
       if (statusRes.status === 'processing') {
-        progress.value = Math.round((statusRes.progress || 0) * 100)
+        store.progress = Math.round((statusRes.progress || 0) * 100) // ✅ 写入 store
         result.value = { ...result.value, status: 'processing' }
+        store.videoResult = result.value
       } else if (statusRes.status === 'completed') {
         stopPolling()
-        progress.value = 100
+        store.progress = 100 // ✅
 
         let attempts = 0
         const maxAttempts = 5
@@ -248,12 +255,14 @@ async function startPolling() {
         }
 
         result.value = { ...result.value, status: 'completed' }
+        store.videoResult = result.value
         await loadVideoObjectsAndInfo()
       } else if (statusRes.status === 'failed') {
         stopPolling()
         ElMessage.error('视频处理失败，请重试')
         result.value = { ...result.value, status: 'failed' }
-        progress.value = 0
+        store.videoResult = result.value
+        store.progress = 0 // ✅
       }
     } catch (err) {
       console.warn('轮询状态失败:', err)
@@ -279,7 +288,6 @@ async function loadVideoObjectsAndInfo() {
     ])
 
     allObjects.value = objectsRes.objects
-
     videoInfo.value = detectionsRes.video_info || { fps: 25, total_frames: 0 }
 
     store.allObjects = allObjects.value
@@ -314,21 +322,26 @@ function clearResult() {
   currentFrameIndex.value = -1
   allObjects.value = []
   videoId.value = ''
-  progress.value = 0
+  store.progress = 0 // ✅
   stopPolling()
 
   store.clearVideoResult()
-  localStorage.removeItem('videoDetectCache')
 }
 
 onMounted(() => {
-  // 从 store 恢复已完成的结果（只读展示）
-  if (store.videoResult?.status === 'completed' && store.videoId) {
-    result.value = store.videoResult
-    rawResultUrl.value = store.rawResultUrl
+  if (store.videoId) {
     videoId.value = store.videoId
-    allObjects.value = [...store.allObjects]
-    videoInfo.value = { ...store.videoInfo }
+    rawResultUrl.value = store.rawResultUrl
+    allObjects.value = [...(store.allObjects || [])]
+    videoInfo.value = { ...(store.videoInfo || { fps: 25, total_frames: 0 }) }
+    result.value = store.videoResult
+
+    if (store.videoResult?.status === 'completed') {
+      store.progress = 100
+    } else if (store.videoResult?.status === 'processing') {
+      // ✅ 进度已从 store 恢复，直接启动轮询
+      startPolling()
+    }
   }
 })
 
