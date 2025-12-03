@@ -209,8 +209,8 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
                     'current_bbox': [x1, y1, x2, y2]
                 }
 
-        draw_frame_stats(frame, frame_idx, len(frame_detection_data["detections"]),
-                         total_frames, fps, w)
+        # draw_frame_stats(frame, frame_idx, len(frame_detection_data["detections"]),
+        #                  total_frames, fps, w)
         frame_detections.append(frame_detection_data)
         out.write(frame)
 
