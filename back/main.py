@@ -10,14 +10,19 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 
 # 正确指向 static 目录下的 uploads 和 results
-UPLOAD_DIR = (BASE_DIR / "static" / "uploads").as_posix()
-RESULT_DIR = (BASE_DIR / "static" / "results").as_posix()
+# UPLOAD_DIR = (BASE_DIR / "static" / "uploads").as_posix()
+# RESULT_DIR = (BASE_DIR / "static" / "results").as_posix()
+
+# ✅ 推荐：直接用 Path 对象（Starlette 支持）
+UPLOAD_DIR = BASE_DIR / "static" / "uploads"
+RESULT_DIR = BASE_DIR / "static" / "results"
 
 # 确保目录存在
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(RESULT_DIR, exist_ok=True)
 
 app = FastAPI(title="YOLOv8 Detection & Tracking")
+
 
 # 挂载静态文件服务
 app.mount("/files/upload", StaticFiles(directory=UPLOAD_DIR), name="upload")

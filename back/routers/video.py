@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 import os
 import time
@@ -91,25 +91,28 @@ def convert_to_h264_compatible(input_path: str, output_path: str):
                 logger.warning(f"⚠️ 无法删除临时文件 {input_path}: {e}")
 
 # ================== 文件访问路由 ==================
-@router.get("/files/upload/{filename}")
-async def get_upload_file(filename: str):
-    safe_name = sanitize_filename(filename)
-    if safe_name != filename:
-        raise HTTPException(status_code=400, detail="非法文件名")
-    file_path = os.path.join(UPLOAD_DIR, safe_name)
-    if not _is_safe_path(UPLOAD_DIR, file_path) or not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
-    return FileResponse(file_path)
-
-@router.get("/files/result/{filename}")
-async def get_result_file(filename: str):
-    safe_name = sanitize_filename(filename)
-    if safe_name != filename:
-        raise HTTPException(status_code=400, detail="非法文件名")
-    file_path = os.path.join(RESULT_DIR, safe_name)
-    if not _is_safe_path(RESULT_DIR, file_path) or not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
-    return FileResponse(file_path)
+# @router.head("/files/upload/{filename}", status_code=200)
+# @router.get("/files/upload/{filename}")
+# async def get_upload_file(filename: str):
+#     safe_name = sanitize_filename(filename)
+#     if safe_name != filename:
+#         raise HTTPException(status_code=400, detail="非法文件名")
+#     file_path = os.path.join(UPLOAD_DIR, safe_name)
+#     if not _is_safe_path(UPLOAD_DIR, file_path) or not os.path.exists(file_path):
+#         raise HTTPException(status_code=404, detail="文件不存在")
+#     return FileResponse(file_path)
+#
+#
+# @router.head("/files/result/{filename}", status_code=200)
+# @router.get("/files/result/{filename}")
+# async def get_result_file(filename: str):
+#     safe_name = sanitize_filename(filename)
+#     if safe_name != filename:
+#         raise HTTPException(status_code=400, detail="非法文件名")
+#     file_path = os.path.join(RESULT_DIR, safe_name)
+#     if not _is_safe_path(RESULT_DIR, file_path) or not os.path.exists(file_path):
+#         raise HTTPException(status_code=404, detail="文件不存在")
+#     return FileResponse(file_path)
 
 
 # ================== 视频处理核心函数 ==================
@@ -322,7 +325,7 @@ async def detect_video(
     return {
         "status": "processing",
         "video_id": video_id,
-        "result_url": f"/api/files/result/{out_name}",
+        "result_url": f"/files/result/{out_name}",
         "message": "视频正在处理中，处理完成后可控制框的显示",
         "features": {
             "box_controls": True,

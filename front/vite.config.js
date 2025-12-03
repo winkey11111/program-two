@@ -16,3 +16,10 @@ export default defineConfig({
     }
   }
 })
+//  server: {
+//  proxy: {
+//    "/api": "https://nonintellectually-subsonic-kai.ngrok-free.dev",
+//    "/files": "https://nonintellectually-subsonic-kai.ngrok.dev"
+//  }
+//}
+//})
