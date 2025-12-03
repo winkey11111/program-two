@@ -1,7 +1,8 @@
 import axios from "axios";
 
 // API 基础地址，默认为本地开发地址
-const BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api";
+//const BASE = import.meta.env.VITE_API_BASE || "http://192.168.8.101:8000/api";
+const BASE = import.meta.env.VITE_API_BASE || "https://nonintellectually-subsonic-kai.ngrok-free.dev/api";
 const FILE_BASE = BASE.replace("/api", ""); // 自动从BASE中移除/api
 
 /**
