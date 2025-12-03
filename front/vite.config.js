@@ -9,16 +9,16 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src') 
     }
   },
-//  server: {
-//    proxy: {
-//      '/api': 'http://192.168.8.101:8000',
-//      '/files': 'http://192.168.8.101:8000'
-//    }
-//  }
   server: {
-  proxy: {
-    "/api": "https://nonintellectually-subsonic-kai.ngrok-free.dev",
-    "/files": "https://nonintellectually-subsonic-kai.ngrok.dev"
+    proxy: {
+      '/api': 'http://localhost:8000',
+      '/files': 'http://localhost:8000'
+    }
   }
-}
+//  server: {
+//  proxy: {
+//    "/api": "https://nonintellectually-subsonic-kai.ngrok-free.dev",
+//    "/files": "https://nonintellectually-subsonic-kai.ngrok.dev"
+//  }
+//}
 })
