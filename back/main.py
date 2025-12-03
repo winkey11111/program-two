@@ -19,6 +19,7 @@ os.makedirs(RESULT_DIR, exist_ok=True)
 
 app = FastAPI(title="YOLOv8 Detection & Tracking")
 
+
 # 挂载静态文件服务
 app.mount("/files/upload", StaticFiles(directory=UPLOAD_DIR), name="upload")
 app.mount("/files/result", StaticFiles(directory=RESULT_DIR), name="result")

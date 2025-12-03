@@ -1,3 +1,4 @@
+from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Query, Request
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Query
 from fastapi.responses import FileResponse
 import os
@@ -15,6 +16,7 @@ import numpy as np
 import logging
 import subprocess
 import torch
+from fastapi.responses import Response, FileResponse
 
 # ================== 日志 ==================
 logging.basicConfig(
@@ -91,25 +93,96 @@ def convert_to_h264_compatible(input_path: str, output_path: str):
                 logger.warning(f"⚠️ 无法删除临时文件 {input_path}: {e}")
 
 # ================== 文件访问路由 ==================
-@router.get("/files/upload/{filename}")
-async def get_upload_file(filename: str):
+@router.api_route("/files/upload/{filename}", methods=["GET", "HEAD"])
+async def get_upload_file(filename: str, request: Request):
+    """
+    处理上传文件的GET和HEAD请求
+    """
     safe_name = sanitize_filename(filename)
     if safe_name != filename:
         raise HTTPException(status_code=400, detail="非法文件名")
-    file_path = os.path.join(UPLOAD_DIR, safe_name)
-    if not _is_safe_path(UPLOAD_DIR, file_path) or not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
-    return FileResponse(file_path)
 
-@router.get("/files/result/{filename}")
-async def get_result_file(filename: str):
+    file_path = os.path.join(UPLOAD_DIR, safe_name)
+
+    # 安全检查
+    if not _is_safe_path(UPLOAD_DIR, file_path) or not os.path.exists(file_path):
+        logger.error(f"❌ 文件不存在: {file_path}")
+        logger.error(f"📁 查找目录: {UPLOAD_DIR}")
+        if os.path.exists(UPLOAD_DIR):
+            logger.error(f"📁 目录内容: {os.listdir(UPLOAD_DIR)}")
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    # 获取文件信息
+    file_stat = os.stat(file_path)
+    file_size = file_stat.st_size
+
+    # HEAD只返回头部信息，不返回文件内容
+    if request.method == "HEAD":
+        return Response(
+            status_code=200,
+            headers={
+                "Content-Length": str(file_size),
+                "Content-Type": "application/octet-stream",
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=3600",
+                "Last-Modified": time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(file_stat.st_mtime))
+            }
+        )
+
+    # GET请求：返回完整文件
+    return FileResponse(
+        file_path,
+        filename=filename,
+        media_type='application/octet-stream'
+    )
+
+
+@router.api_route("/files/result/{filename}", methods=["GET", "HEAD"])
+async def get_result_file(filename: str, request: Request):
+    """
+    处理结果视频文件的GET和HEAD请求
+    """
     safe_name = sanitize_filename(filename)
     if safe_name != filename:
         raise HTTPException(status_code=400, detail="非法文件名")
+
     file_path = os.path.join(RESULT_DIR, safe_name)
+
+    # 安全检查
     if not _is_safe_path(RESULT_DIR, file_path) or not os.path.exists(file_path):
+        logger.error(f"❌ 结果文件不存在: {file_path}")
+        logger.error(f"📁 查找目录: {RESULT_DIR}")
+        if os.path.exists(RESULT_DIR):
+            logger.error(f"📁 目录内容: {os.listdir(RESULT_DIR)}")
         raise HTTPException(status_code=404, detail="文件不存在")
-    return FileResponse(file_path)
+
+    # 获取文件信息
+    file_stat = os.stat(file_path)
+    file_size = file_stat.st_size
+
+    # HEAD请求：只返回头部信息
+    if request.method == "HEAD":
+        return Response(
+            status_code=200,
+            headers={
+                "Content-Length": str(file_size),
+                "Content-Type": "video/mp4",
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=3600",
+                "Last-Modified": time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(file_stat.st_mtime))
+            }
+        )
+
+    # GET请求：返回完整文件
+    return FileResponse(
+        file_path,
+        filename=filename,
+        media_type='video/mp4',
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size)
+        }
+    )
 
 
 # ================== 视频处理核心函数 ==================

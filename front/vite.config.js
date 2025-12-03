@@ -15,10 +15,11 @@ export default defineConfig({
       '/files': 'http://localhost:8000'
     }
   }
+})
 //  server: {
 //  proxy: {
 //    "/api": "https://nonintellectually-subsonic-kai.ngrok-free.dev",
 //    "/files": "https://nonintellectually-subsonic-kai.ngrok.dev"
 //  }
 //}
-})
+//})
