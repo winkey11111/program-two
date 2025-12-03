@@ -14,12 +14,14 @@
       <el-button @click="clearResult" class="ml-8">清空</el-button>
     </div>
 
+    <!-- 处理中进度提示 -->
+    <div v-if="result && result.status === 'processing'" class="processing-banner">
+      视频处理中：{{ store.progress }}%
+      <el-progress :percentage="store.progress" :stroke-width="4" style="margin-top: 8px;" />
+    </div>
+
     <!-- 主内容区：始终显示双栏 -->
     <div class="outer-frame">
-      <div v-if="result && result.status !== 'completed'" class="processing-banner">
-        视频正在后台处理中，请稍后刷新或查看<a href="/#/records">历史记录</a>。
-      </div>
-
       <div class="result-layout">
         <!-- 视频预览区 -->
         <div class="preview-section">
@@ -28,21 +30,17 @@
             <video
               v-if="previewVideoUrl || (result?.status === 'completed')"
               ref="videoRef"
-              :src="result?.status === 'completed' ? resultUrl : previewVideoUrl"
+              :src="result?.status === 'completed' ? resultUrlWithTimestamp : previewVideoUrl"
               controls
               class="preview-video"
               @timeupdate="onTimeUpdate"
-              @play="onVideoPlay"
-              @pause="onVideoPause"
             ></video>
-            <canvas
-              v-if="result?.status === 'completed'"
-              ref="overlayCanvasRef"
-              class="overlay-canvas"
-            ></canvas>
 
             <!-- 占位提示 -->
-            <div v-if="!previewVideoUrl && (!result || result.status !== 'completed')" class="empty-placeholder">
+            <div
+              v-if="!previewVideoUrl && (!result || result.status !== 'completed')"
+              class="empty-placeholder"
+            >
               <el-icon class="empty-icon"><VideoCamera /></el-icon>
               <p>{{ file ? '视频处理中…' : '请上传视频' }}</p>
             </div>
@@ -51,26 +49,7 @@
 
         <!-- 检测结果表格 -->
         <div class="detection-section">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <h3>识别结果{{ currentFrameIndex >= 0 ? `（第 ${currentFrameIndex} 帧）` : '' }}</h3>
-            <!-- 控制按钮组 -->
-            <div class="control-buttons">
-              <el-button
-                v-if="result?.status === 'completed' && allObjects.length > 0"
-                size="small"
-                @click="toggleAllBoxes"
-              >
-                {{ allHidden ? '显示全部' : '隐藏全部' }}
-              </el-button>
-              <el-button
-                v-if="result?.status === 'completed' && allObjects.length > 0"
-                size="small"
-                @click="resetBoxes"
-              >
-                重置显示
-              </el-button>
-            </div>
-          </div>
+          <h3>识别结果{{ currentFrameIndex >= 0 ? `（第 ${currentFrameIndex} 帧）` : '' }}</h3>
           <div class="inner-frame">
             <div v-if="result?.status === 'completed' && allObjects?.length">
               <el-table
@@ -79,36 +58,24 @@
                 table-layout="fixed"
                 height="300"
               >
-                <el-table-column prop="class" label="类别" width="80" />
-                <el-table-column label="ID" width="60">
+                <el-table-column prop="class" label="类别" width="100" />
+                <el-table-column label="ID" width="70">
                   <template #default="{ row }">
                     {{ row.id }}
                   </template>
                 </el-table-column>
-                <el-table-column label="置信度" width="80">
+                <el-table-column label="置信度" width="90">
                   <template #default="{ row }">
                     {{ (row.confidence * 100).toFixed(1) }}%
                   </template>
                 </el-table-column>
-                <el-table-column label="边界框" width="160" show-overflow-tooltip>
+                <el-table-column label="边界框" width="180" show-overflow-tooltip>
                   <template #default="{ row }">
                     {{ row.bbox?.map(v => Math.round(v)).join(', ') }}
                   </template>
                 </el-table-column>
-                <el-table-column label="操作" width="80">
-                  <template #default="{ row }">
-                    <el-switch
-                      v-model="row.visible"
-                      inline-prompt
-                      size="small"
-                      active-text="显"
-                      inactive-text="隐"
-                      @change="(val) => toggleBoxVisibility(row.id, val)"
-                    />
-                  </template>
-                </el-table-column>
               </el-table>
-              
+
               <!-- 所有物体列表 -->
               <div class="all-objects-section">
                 <h4>所有检测物体</h4>
@@ -118,32 +85,20 @@
                   table-layout="fixed"
                   height="200"
                 >
-                  <el-table-column label="ID" width="60">
+                  <el-table-column label="ID" width="70">
                     <template #default="{ row }">
                       {{ row.id }}
                     </template>
                   </el-table-column>
-                  <el-table-column prop="class" label="类别" width="80" />
-                  <el-table-column label="出现次数" width="80">
+                  <el-table-column prop="class" label="类别" width="100" />
+                  <el-table-column label="出现次数" width="90">
                     <template #default="{ row }">
                       {{ row.appearances }}
                     </template>
                   </el-table-column>
-                  <el-table-column label="首次出现" width="100">
+                  <el-table-column label="首次出现" width="110">
                     <template #default="{ row }">
                       {{ formatTimestamp(row.first_seen) }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="80">
-                    <template #default="{ row }">
-                      <el-switch
-                        v-model="row.visible"
-                        inline-prompt
-                        size="small"
-                        active-text="显"
-                        inactive-text="隐"
-                        @change="(val) => toggleBoxVisibility(row.id, val)"
-                      />
                     </template>
                   </el-table-column>
                 </el-table>
@@ -163,139 +118,158 @@
 
 <script setup>
 import { ElMessage } from 'element-plus'
-import { ref, onMounted, onUnmounted } from 'vue'
-import { 
-  uploadVideo, 
-  getVideoDetections, 
-  getVideoObjects, 
-  toggleVideoBoxes, 
-  resetVideoBoxes,
+import { ref, onMounted, onUnmounted, computed } from 'vue'
+import {
+  uploadVideo,
+  getVideoDetections,
+  getVideoObjects,
   getVideoStatus
 } from '../api'
 import { VideoCamera } from '@element-plus/icons-vue'
+import { useDetectStore } from '../stores/detect'
 
+const store = useDetectStore()
+
+// ========== 响应式状态 ==========
 const file = ref(null)
-const previewVideoUrl = ref('') // 本地预览 URL
+const previewVideoUrl = ref('')
 const result = ref(null)
-const resultUrl = ref('')
+const rawResultUrl = ref('')
 const videoRef = ref(null)
-const overlayCanvasRef = ref(null)
 const currentFrameObjects = ref([])
 const currentFrameIndex = ref(-1)
 const allObjects = ref([])
-const hiddenIds = ref([])
 const videoId = ref('')
-const isVideoPlaying = ref(false)
-const allHidden = ref(false)
-const pollingInterval = ref(null) // 轮询定时器
-const isPolling = ref(false)      // 防止重复轮询
+const pollingInterval = ref(null)
+const isPolling = ref(false)
 
-// 监听视频播放事件
-function onVideoPlay() {
-  isVideoPlaying.value = true
-  updateDetectionData()
+const videoInfo = ref({ fps: 25, total_frames: 0 })
+
+const resultUrlWithTimestamp = computed(() => {
+  return rawResultUrl.value ? `${rawResultUrl.value}?t=${Date.now()}` : ''
+})
+
+// ========== 工具函数 ==========
+function formatTimestamp(seconds) {
+  if (seconds == null) return '--'
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.floor(seconds % 60)
+  return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
-// 监听视频暂停事件
-function onVideoPause() {
-  isVideoPlaying.value = false
+async function isVideoAccessible(url) {
+  try {
+    const response = await fetch(url, { method: 'HEAD' })
+    return response.ok
+  } catch (error) {
+    console.warn('Video file not accessible yet:', url, error)
+    return false
+  }
 }
 
-// 定期更新检测数据（用于流畅显示）
-function updateDetectionData() {
-  if (!isVideoPlaying.value) return
-  onTimeUpdate()
-  setTimeout(updateDetectionData, 200)
+// ========== 事件监听 ==========
+function onTimeUpdate() {
+  if (!videoRef.value || !videoId.value || result.value?.status !== 'completed') return
+
+  const currentTime = videoRef.value.currentTime
+  const frameIndex = Math.min(
+    Math.floor(currentTime * videoInfo.value.fps),
+    videoInfo.value.total_frames - 1
+  )
+  currentFrameIndex.value = frameIndex
+  getFrameDetections(frameIndex)
 }
 
-// 选择文件时创建本地预览
+// ========== 文件选择 ==========
 function beforeUpload(fileRaw) {
   file.value = fileRaw
   previewVideoUrl.value = URL.createObjectURL(fileRaw)
 
+  // 👇 保存可持久化的元信息
+  store.videoFileMeta = {
+    name: fileRaw.name,
+    size: fileRaw.size,
+    type: fileRaw.type,
+    lastModified: fileRaw.lastModified
+  }
+
   // 重置状态
   result.value = null
-  resultUrl.value = ''
+  rawResultUrl.value = ''
   currentFrameObjects.value = []
   currentFrameIndex.value = -1
   allObjects.value = []
-  hiddenIds.value = []
   videoId.value = ''
-  allHidden.value = false
-  isVideoPlaying.value = false
+  store.progress = 0 // ✅ 使用 store.progress
 
-  return false // 阻止自动上传
+  return false
 }
 
-// 上传视频并启动状态轮询
+// ========== 上传并启动轮询 ==========
 async function upload() {
   if (!file.value || isPolling.value) return
 
   try {
     const res = await uploadVideo(file.value)
     result.value = res
+    videoId.value = res.video_id
+    if (!videoId.value) throw new Error('后端未返回 video_id')
 
-    // 提取 video_id（更可靠的方式）
-    const url = res.result_url // e.g. "/files/result/res_abc123.mp4"
-    const match = url?.match(/res_([a-z0-9]+)\.mp4$/)
-    if (match) {
-      videoId.value = match[1]
-    } else {
-      throw new Error('无法解析 video_id')
-    }
+    rawResultUrl.value = `http://localhost:8000${res.result_url}`
 
-    resultUrl.value = `http://localhost:8000${res.result_url}`
+    store.videoResult = res
+    store.rawResultUrl = rawResultUrl.value
+    store.videoId = videoId.value
+    store.progress = 0 // ✅ 初始化进度
 
-    // 启动轮询（无论 status 是什么，都轮询）
     startPolling()
   } catch (error) {
     console.error('上传失败:', error)
-    isPolling.value = false
+    ElMessage.error('上传失败，请重试')
   }
 }
 
-// 加载所有检测物体
-async function loadVideoObjects() {
-  if (!videoId.value) return
-  try {
-    const res = await getVideoObjects(videoId.value)
-    allObjects.value = res.objects.map(obj => ({
-      ...obj,
-      visible: true
-    }))
-    updateHiddenIds()
-  } catch (error) {
-    console.error('获取物体列表失败:', error)
-  }
-}
-
-// 启动轮询
-function startPolling() {
+// ========== 轮询状态 ==========
+async function startPolling() {
   if (isPolling.value || !videoId.value) return
   isPolling.value = true
 
   pollingInterval.value = setInterval(async () => {
     try {
       const statusRes = await getVideoStatus(videoId.value)
-      result.value = { ...result.value, status: statusRes.status }
 
-      if (statusRes.status === 'completed') {
+      if (statusRes.status === 'processing') {
+        store.progress = Math.round((statusRes.progress || 0) * 100) // ✅ 写入 store
+        result.value = { ...result.value, status: 'processing' }
+        store.videoResult = result.value
+      } else if (statusRes.status === 'completed') {
         stopPolling()
-        await loadVideoObjects() // ✅ 状态完成后再加载物体
+        store.progress = 100 // ✅
+
+        let attempts = 0
+        const maxAttempts = 5
+        const finalUrl = rawResultUrl.value
+        while (attempts < maxAttempts && !(await isVideoAccessible(finalUrl))) {
+          await new Promise(resolve => setTimeout(resolve, 800))
+          attempts++
+        }
+
+        result.value = { ...result.value, status: 'completed' }
+        store.videoResult = result.value
+        await loadVideoObjectsAndInfo()
       } else if (statusRes.status === 'failed') {
         stopPolling()
         ElMessage.error('视频处理失败，请重试')
+        result.value = { ...result.value, status: 'failed' }
+        store.videoResult = result.value
+        store.progress = 0 // ✅
       }
-      // processing 状态：继续轮询
     } catch (err) {
       console.warn('轮询状态失败:', err)
-      // 可选：出错也停止轮询
-      // stopPolling()
     }
-  }, 1500) // 每1.5秒查一次
+  }, 1500)
 }
 
-// 停止轮询
 function stopPolling() {
   if (pollingInterval.value) {
     clearInterval(pollingInterval.value)
@@ -304,116 +278,78 @@ function stopPolling() {
   isPolling.value = false
 }
 
-// 切换单个框可见性
-function toggleBoxVisibility(boxId, visible) {
-  const obj = allObjects.value.find(o => o.id === boxId)
-  if (obj) {
-    obj.visible = visible
-    updateHiddenIds()
-    updateVideoBoxes()
-  }
-}
-
-// 更新隐藏 ID 列表
-function updateHiddenIds() {
-  hiddenIds.value = allObjects.value
-    .filter(obj => !obj.visible)
-    .map(obj => obj.id)
-  allHidden.value = hiddenIds.value.length === allObjects.value.length
-}
-
-// 通知后端更新视频框（可选，若后端支持动态渲染）
-async function updateVideoBoxes() {
+// ========== 加载物体 + 视频信息 ==========
+async function loadVideoObjectsAndInfo() {
   if (!videoId.value) return
   try {
-    await toggleVideoBoxes(videoId.value, hiddenIds.value, false)
+    const [objectsRes, detectionsRes] = await Promise.all([
+      getVideoObjects(videoId.value),
+      getVideoDetections(videoId.value)
+    ])
+
+    allObjects.value = objectsRes.objects
+    videoInfo.value = detectionsRes.video_info || { fps: 25, total_frames: 0 }
+
+    store.allObjects = allObjects.value
+    store.videoInfo = videoInfo.value
   } catch (error) {
-    console.error('更新视频框失败:', error)
+    console.error('获取视频元数据失败:', error)
   }
 }
 
-// 切换全部显示/隐藏
-function toggleAllBoxes() {
-  const newValue = !allHidden.value
-  allObjects.value.forEach(obj => {
-    obj.visible = newValue
-  })
-  updateHiddenIds()
-  updateVideoBoxes()
-}
-
-// 重置为全部显示
-async function resetBoxes() {
-  try {
-    await resetVideoBoxes(videoId.value)
-    allObjects.value.forEach(obj => {
-      obj.visible = true
-    })
-    updateHiddenIds()
-  } catch (error) {
-    console.error('重置框显示失败:', error)
-  }
-}
-
-// 格式化时间戳（秒）
-function formatTimestamp(timestamp) {
-  return `${timestamp.toFixed(2)}s`
-}
-
-// 视频时间更新时获取当前帧检测
-function onTimeUpdate() {
-  if (!videoRef.value || !videoId.value) return
-
-  const currentTime = videoRef.value.currentTime
-  const fps = 25 // 实际应从后端获取，此处假设
-  const frameIndex = Math.floor(currentTime * fps)
-  currentFrameIndex.value = frameIndex
-
-  getFrameDetections(frameIndex)
-}
-
-// 获取指定帧的检测数据
+// ========== 帧同步 ==========
 async function getFrameDetections(frameIndex) {
-  if (!videoId.value) return
+  if (!videoId.value || frameIndex < 0) return
+
   try {
     const res = await getVideoDetections(videoId.value, frameIndex)
-    const visibleDetections = res.detections.filter(d => !hiddenIds.value.includes(d.id))
-    currentFrameObjects.value = visibleDetections.map(d => ({
-      ...d,
-      visible: !hiddenIds.value.includes(d.id)
-    }))
+    currentFrameObjects.value = res.detections || []
   } catch (error) {
     console.error('获取帧检测数据失败:', error)
   }
 }
 
+// ========== 清空 & 生命周期 ==========
 function clearResult() {
-  stopPolling() // 👈 新增
   if (previewVideoUrl.value) {
     URL.revokeObjectURL(previewVideoUrl.value)
     previewVideoUrl.value = ''
   }
   file.value = null
   result.value = null
-  resultUrl.value = ''
+  rawResultUrl.value = ''
   currentFrameObjects.value = []
   currentFrameIndex.value = -1
   allObjects.value = []
-  hiddenIds.value = []
   videoId.value = ''
-  allHidden.value = false
-  isVideoPlaying.value = false
+  store.progress = 0 // ✅
+  stopPolling()
+
+  store.clearVideoResult()
 }
 
-onUnmounted(() => {
-  if (videoRef.value) {
-    videoRef.value.pause()
+onMounted(() => {
+  if (store.videoId) {
+    videoId.value = store.videoId
+    rawResultUrl.value = store.rawResultUrl
+    allObjects.value = [...(store.allObjects || [])]
+    videoInfo.value = { ...(store.videoInfo || { fps: 25, total_frames: 0 }) }
+    result.value = store.videoResult
+
+    if (store.videoResult?.status === 'completed') {
+      store.progress = 100
+    } else if (store.videoResult?.status === 'processing') {
+      // ✅ 进度已从 store 恢复，直接启动轮询
+      startPolling()
+    }
   }
+})
+
+onUnmounted(() => {
   if (previewVideoUrl.value) {
     URL.revokeObjectURL(previewVideoUrl.value)
   }
-  stopPolling() // 👈 新增
-  isVideoPlaying.value = false
+  stopPolling()
 })
 </script>
 
@@ -435,18 +371,16 @@ onUnmounted(() => {
 }
 
 .processing-banner {
-  background-color: #fffbe6;
-  border: 1px solid #ffe58f;
+  background-color: #f0f9ff;
+  border: 1px solid #b3d8ff;
   border-radius: 4px;
-  padding: 8px 12px;
+  padding: 12px;
   margin-bottom: 16px;
-  color: #faad14;
+  color: #1989fa;
   font-size: 14px;
-}
-
-.processing-banner a {
-  color: #409eff;
-  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .outer-frame {
@@ -497,11 +431,7 @@ h4 {
   overflow: hidden;
 }
 
-.preview-video,
-.overlay-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
+.preview-video {
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -530,11 +460,6 @@ h4 {
   margin-top: 16px;
 }
 
-.control-buttons {
-  display: flex;
-  gap: 8px;
-}
-
 :deep(.el-empty) {
   margin: 60px 0;
 }
@@ -543,11 +468,7 @@ h4 {
   & .cell {
     padding: 0 4px !important;
   }
-  
-  & th {
-    padding: 4px 0 !important;
-  }
-  
+  & th,
   & td {
     padding: 4px 0 !important;
   }

@@ -1,4 +1,3 @@
-# backend/routers/video.py
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Query
 from fastapi.responses import FileResponse
 import os
@@ -15,7 +14,9 @@ import cv2
 import numpy as np
 import logging
 import subprocess
+import torch
 
+# ================== 日志 ==================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -27,21 +28,28 @@ router = APIRouter()
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(RESULT_DIR, exist_ok=True)
 
+# ================== 设备 ==================
+device = "cuda" if torch.cuda.is_available() else "cpu"
+logger.info(f"ℹ️ 使用设备: {device.upper()}")
+
+# ================== 加载模型 ==================
 try:
     model = YOLO(MODEL_PATH)
-    logger.info(f"✅ 模型加载成功，支持 {len(model.names)} 个类别: {model.names}")
+    logger.info(f"✅ 模型加载成功，类别数: {len(model.names)} | 类别: {model.names}")
 except Exception as e:
     logger.error(f"❌ 模型加载失败: {e}")
     model = None
 
+# ================== 视频状态存储 ==================
 video_detection_data: Dict[str, Any] = {}
 
-
+# ================== 辅助函数 ==================
 def sanitize_filename(filename: str) -> str:
+    """清理文件名，仅保留安全字符"""
     return re.sub(r"[^a-zA-Z0-9_.-]", "_", filename)
 
-
 def _is_safe_path(base_dir: str, path: str) -> bool:
+    """防止路径遍历攻击"""
     try:
         base_real = os.path.realpath(base_dir)
         path_real = os.path.realpath(path)
@@ -49,10 +57,10 @@ def _is_safe_path(base_dir: str, path: str) -> bool:
     except Exception:
         return False
 
-
 def convert_to_h264_compatible(input_path: str, output_path: str):
     """
     使用 ffmpeg 将视频转为 H.264 + AAC 的 MP4（网页兼容格式）
+    并删除原始临时文件
     """
     cmd = [
         "ffmpeg",
@@ -69,7 +77,7 @@ def convert_to_h264_compatible(input_path: str, output_path: str):
     ]
     try:
         logger.info(f"🔄 开始转码为 H.264 兼容格式: {output_path}")
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
         logger.info("✅ 转码完成")
     except subprocess.CalledProcessError as e:
         logger.error(f"❌ FFmpeg 转码失败: {e.stderr}")
@@ -82,9 +90,7 @@ def convert_to_h264_compatible(input_path: str, output_path: str):
             except OSError as e:
                 logger.warning(f"⚠️ 无法删除临时文件 {input_path}: {e}")
 
-
-# ========== 文件访问路由 ==========
-
+# ================== 文件访问路由 ==================
 @router.get("/files/upload/{filename}")
 async def get_upload_file(filename: str):
     safe_name = sanitize_filename(filename)
@@ -94,7 +100,6 @@ async def get_upload_file(filename: str):
     if not _is_safe_path(UPLOAD_DIR, file_path) or not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="文件不存在")
     return FileResponse(file_path)
-
 
 @router.get("/files/result/{filename}")
 async def get_result_file(filename: str):
@@ -107,8 +112,7 @@ async def get_result_file(filename: str):
     return FileResponse(file_path)
 
 
-# ========== 视频处理核心函数 ==========
-
+# ================== 视频处理核心函数 ==================
 def process_video_with_controls(video_id: str, input_path: str, output_path: str, conf_threshold: float = 0.5):
     if model is None:
         raise HTTPException(status_code=500, detail="模型未加载成功")
@@ -116,18 +120,22 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
     logger.info(f"🚀 开始视频处理: {input_path}")
     start_time = time.time()
 
+    # GPU 强制使用
+    device_opt = "cuda" if torch.cuda.is_available() else "cpu"
+
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
         raise HTTPException(status_code=500, detail="无法打开视频文件")
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 25
-    w, h = int(cap.get(3)), int(cap.get(4))
+    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     temp_output_path = output_path.replace(".mp4", "_temp.mp4")
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(temp_output_path, fourcc, fps, (w, h))
 
+    # ================== YOLO 处理 ==================
     results = model.track(
         source=input_path,
         imgsz=1280,
@@ -136,6 +144,7 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
         persist=True,
         tracker="bytetrack.yaml",
         verbose=False,
+        device=device_opt,  # 这里指定 GPU/CPU
         stream=True
     )
 
@@ -145,7 +154,7 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
     frame_detections = []
 
     for frame_idx, result in enumerate(results):
-        # 🆕 实时更新进度
+        # 实时更新进度
         progress = frame_idx / total_frames if total_frames > 0 else 0
         if video_id in video_detection_data:
             video_detection_data[video_id]["progress"] = progress
@@ -202,15 +211,14 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
         frame_detections.append(frame_detection_data)
         out.write(frame)
 
-        if frame_idx % 100 == 0:
-            logger.info(f"📊 处理进度: {frame_idx}/{total_frames} 帧")
+        if frame_idx % 50 == 0:
+            logger.info(f"📊 处理进度: {frame_idx}/{total_frames} 帧 ({progress * 100:.2f}%)")
 
     cap.release()
     out.release()
 
     convert_to_h264_compatible(temp_output_path, output_path)
 
-    # ✅ 处理完成，覆盖状态为 completed
     video_detection_data[video_id] = {
         "status": "completed",
         "detections": frame_detections,
@@ -237,6 +245,92 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
     }
 
 
+# ================== 视频检测路由 ==================
+def _validate_video_id(video_id: str):
+    if not re.match(r"^[a-zA-Z0-9_-]+$", video_id):
+        raise HTTPException(status_code=400, detail="无效的 video_id")
+
+
+@router.post("/detect/video")
+async def detect_video(
+        file: UploadFile = File(...),
+        background_tasks: BackgroundTasks = None,
+        conf: float = 0.5
+):
+    if conf < 0 or conf > 1:
+        raise HTTPException(status_code=400, detail="置信度应在 0~1 之间")
+
+    filename = sanitize_filename(file.filename)
+    name_no_ext, ext = os.path.splitext(filename)
+    ext = ext.lower()
+    if ext not in [".mp4", ".avi", ".mov", ".mkv"]:
+        raise HTTPException(status_code=400, detail="不支持的视频格式")
+
+    timestamp = int(time.time() * 1000)
+    save_name = f"{timestamp}_{name_no_ext}{ext}"
+    out_name = f"res_{timestamp}_{name_no_ext}.mp4"
+    video_id = f"res_{timestamp}_{name_no_ext}"
+
+    save_path = os.path.join(UPLOAD_DIR, save_name)
+    out_path = os.path.join(RESULT_DIR, out_name)
+
+    async with aiofiles.open(save_path, "wb") as out_file:
+        content = await file.read()
+        await out_file.write(content)
+
+    def _bg_task():
+        video_detection_data[video_id] = {
+            "status": "processing",
+            "progress": 0.0,
+            "detections": [],
+            "video_info": {}
+        }
+        try:
+            result_info = process_video_with_controls(video_id, save_path, out_path, conf_threshold=conf)
+
+            db = SessionLocal()
+            try:
+                record = DetectRecord(
+                    type="video",
+                    filename=save_name,
+                    source_path=save_path,
+                    result_path=out_path,
+                    objects=json.dumps({
+                        "video_id": video_id,
+                        "total_tracks": result_info["total_tracks"],
+                        "processing_time": result_info["processing_time"]
+                    })
+                )
+                db.add(record)
+                db.commit()
+                logger.info(f"💾 数据库记录已保存，记录ID: {record.id}")
+            except Exception as db_error:
+                logger.error(f"❌ 数据库保存失败: {db_error}")
+                db.rollback()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"❌ 处理视频时出错: {e}")
+            if video_id in video_detection_data:
+                video_detection_data[video_id]["status"] = "failed"
+
+    if background_tasks:
+        background_tasks.add_task(_bg_task)
+    else:
+        _bg_task()
+
+    return {
+        "status": "processing",
+        "video_id": video_id,
+        "result_url": f"/api/files/result/{out_name}",
+        "message": "视频正在处理中，处理完成后可控制框的显示",
+        "features": {
+            "box_controls": True,
+            "realtime_toggle": True,
+            "confidence_threshold": conf
+        }
+    }
+# ================== 框控制和辅助函数 ==================
 def regenerate_video_with_controls(video_id: str, hidden_ids: List[int],
                                    input_path: str, output_path: str):
     if video_id not in video_detection_data:
@@ -336,96 +430,7 @@ def draw_frame_stats_with_controls(img, frame_idx, visible_count, total_count,
         cv2.putText(img, hidden_text, (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 165, 0), 1)
 
 
-# ========== 视频处理路由 ==========
-
-def _validate_video_id(video_id: str):
-    if not re.match(r"^[a-zA-Z0-9_-]+$", video_id):
-        raise HTTPException(status_code=400, detail="无效的 video_id")
-
-
-@router.post("/detect/video")
-async def detect_video(
-    file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None,
-    conf: float = 0.5
-):
-    if conf < 0 or conf > 1:
-        raise HTTPException(status_code=400, detail="置信度应在 0~1 之间")
-
-    filename = sanitize_filename(file.filename)
-    name_no_ext, ext = os.path.splitext(filename)
-    ext = ext.lower()
-    if ext not in [".mp4", ".avi", ".mov", ".mkv"]:
-        raise HTTPException(status_code=400, detail="不支持的视频格式")
-
-    timestamp = int(time.time() * 1000)
-    save_name = f"{timestamp}_{name_no_ext}{ext}"
-    out_name = f"res_{timestamp}_{name_no_ext}.mp4"
-
-    save_path = os.path.join(UPLOAD_DIR, save_name)
-    out_path = os.path.join(RESULT_DIR, out_name)
-
-    async with aiofiles.open(save_path, "wb") as out_file:
-        content = await file.read()
-        await out_file.write(content)
-
-    def _bg_task():
-        video_id = os.path.splitext(out_name)[0]  # ✅ 提前定义 video_id
-
-        # ✅ 初始化处理状态
-        video_detection_data[video_id] = {
-            "status": "processing",
-            "progress": 0.0,
-            "detections": [],
-            "video_info": {}
-        }
-
-        try:
-            result_info = process_video_with_controls(video_id, save_path, out_path, conf_threshold=conf)
-
-            db = SessionLocal()
-            try:
-                record = DetectRecord(
-                    type="video",
-                    filename=save_name,
-                    source_path=save_path,
-                    result_path=out_path,
-                    objects=json.dumps({
-                        "video_id": video_id,
-                        "total_tracks": result_info["total_tracks"],
-                        "processing_time": result_info["processing_time"]
-                    })
-                )
-                db.add(record)
-                db.commit()
-                logger.info(f"💾 数据库记录已保存，记录ID: {record.id}")
-            except Exception as db_error:
-                logger.error(f"❌ 数据库保存失败: {db_error}")
-                db.rollback()
-            finally:
-                db.close()
-        except Exception as e:
-            logger.error(f"❌ 处理视频时出错: {e}")
-            if video_id in video_detection_data:
-                video_detection_data[video_id]["status"] = "failed"
-
-    if background_tasks:
-        background_tasks.add_task(_bg_task)
-    else:
-        _bg_task()
-
-    return {
-        "status": "processing",
-        "result_url": f"/api/files/result/{out_name}",
-        "message": "视频正在处理中，处理完成后可控制框的显示",
-        "features": {
-            "box_controls": True,
-            "realtime_toggle": True,
-            "confidence_threshold": conf
-        }
-    }
-
-
+# ================== 视频框控制路由 ==================
 @router.post("/video/{video_id}/toggle-boxes")
 async def toggle_video_boxes(
     video_id: str,

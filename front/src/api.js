@@ -1,9 +1,8 @@
 import axios from "axios";
 
-// API 基础地址，默认为本地开发地址
-//const BASE = import.meta.env.VITE_API_BASE || "http://192.168.8.101:8000/api";
-const BASE = import.meta.env.VITE_API_BASE || "https://nonintellectually-subsonic-kai.ngrok-free.dev/api";
-const FILE_BASE = BASE.replace("/api", ""); // 自动从BASE中移除/api
+// API 基础地址
+const BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api";
+const FILE_BASE = BASE.replace("/api", "");
 
 /**
  * 上传图片进行目标检测
@@ -18,7 +17,7 @@ export async function uploadImage(file) {
 }
 
 /**
- * 上传视频进行目标追踪（带置信度）
+ * 上传视频进行目标追踪
  */
 export async function uploadVideo(file, conf = 0.5) {
   const formData = new FormData();
@@ -31,7 +30,7 @@ export async function uploadVideo(file, conf = 0.5) {
 }
 
 /**
- * 分页获取记录列表（推荐使用）
+ * 分页获取记录列表
  */
 export async function getRecordsPaged(page = 1, limit = 20, type = null) {
   const params = { page, limit };
@@ -44,7 +43,7 @@ export async function getRecordsPaged(page = 1, limit = 20, type = null) {
 }
 
 /**
- * 获取单条记录详情（含 source_url 和 result_url）
+ * 获取单条记录详情
  */
 export async function getRecord(id) {
   const res = await axios.get(`${BASE}/records/${id}`);
@@ -52,7 +51,7 @@ export async function getRecord(id) {
 }
 
 /**
- * 删除指定ID的历史记录（可选是否删除物理文件）
+ * 删除指定ID的历史记录
  */
 export async function deleteRecord(id, deleteFiles = false) {
   const params = deleteFiles ? { delete_files: "true" } : {};
@@ -64,7 +63,6 @@ export async function deleteRecord(id, deleteFiles = false) {
 
 /**
  * 切换视频中检测框的显示状态（支持隐藏多个 ID）
- * 注意：hiddenIds 是 number[]，但 FastAPI Query 默认接收字符串，需用 params 传递
  */
 export async function toggleVideoBoxes(videoId, hiddenIds, regenerate = false) {
   // 使用 URLSearchParams 自动处理数组转字符串
@@ -80,7 +78,7 @@ export async function toggleVideoBoxes(videoId, hiddenIds, regenerate = false) {
 }
 
 /**
- * 获取视频检测数据（整段摘要 或 单帧详情）
+ * 获取视频检测数据
  */
 export async function getVideoDetections(videoId, frameIndex = null) {
   const params = frameIndex !== null ? { frame_index: frameIndex } : {};
@@ -89,7 +87,7 @@ export async function getVideoDetections(videoId, frameIndex = null) {
 }
 
 /**
- * 获取视频中所有出现的物体对象列表（按 track ID 聚合）
+ * 获取视频中所有出现的物体对象列表
  */
 export async function getVideoObjects(videoId) {
   const res = await axios.get(`${BASE}/video/${videoId}/objects`);
@@ -97,7 +95,7 @@ export async function getVideoObjects(videoId) {
 }
 
 /**
- * 重置视频框显示（全部可见）
+ * 重置视频框显示
  */
 export async function resetVideoBoxes(videoId) {
   const res = await axios.post(`${BASE}/video/${videoId}/reset`);
@@ -105,7 +103,7 @@ export async function resetVideoBoxes(videoId) {
 }
 
 /**
- * 构造结果视频的直接访问 URL（用于 <video> 标签）
+ * 构造结果视频的直接访问 URL
  */
 export function getVideoResultUrl(filename) {
   return `${FILE_BASE}/files/result/${encodeURIComponent(filename)}`;

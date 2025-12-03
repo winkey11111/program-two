@@ -62,10 +62,18 @@ async function handleDeleteRecord(id) {
 
     await deleteRecord(id)
 
-    records.value = records.value.filter(record => record.id !== id)
-    if (records.value.length === 0 && page.value > 1) {
-      page.value--
-      load()
+    // 重新加载当前页
+    const currentPage = page.value
+    await load() // 这会更新 records 和 total
+
+    // 如果当前页没有数据了，且总记录数 > 0，说明我们删空了最后一页
+    if (records.value.length === 0 && total.value > 0) {
+      // 跳到新的最后一页
+      const newLastPage = Math.ceil(total.value / limit.value)
+      if (newLastPage !== currentPage) {
+        page.value = newLastPage
+        await load()
+      }
     }
 
     ElMessage.success('删除成功')
@@ -76,7 +84,6 @@ async function handleDeleteRecord(id) {
     }
   }
 }
-
 function viewResult(id) {
   router.push(`/records/${id}/result`)
 }

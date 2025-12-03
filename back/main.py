@@ -6,7 +6,7 @@ import uvicorn
 import os
 from pathlib import Path
 
-# 获取项目根目录：假设 main.py 在 program/back/ 下，则根目录是 program/
+# 获取项目根目录
 BASE_DIR = Path(__file__).resolve().parent
 
 # 正确指向 static 目录下的 uploads 和 results
