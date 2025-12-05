@@ -16,18 +16,6 @@ import logging
 import subprocess
 import torch
 
-CLASS_CONF_THRESHOLDS = {
-    "pedestrian": 0.4,   # 行人：召回更重要
-    "bicycle": 0.5,
-    "tricycle": 0.5,
-    "vehicle": 0.45,     # 泛指车辆
-    "bus": 0.5,
-    "truck": 0.5,
-    "engine": 0.6,       # 如果是误检多，可提高阈值
-    # 默认回退值
-    "__default__": 0.375
-}
-
 # ================== 日志 ==================
 logging.basicConfig(
     level=logging.INFO,
@@ -102,6 +90,31 @@ def convert_to_h264_compatible(input_path: str, output_path: str):
             except OSError as e:
                 logger.warning(f"⚠️ 无法删除临时文件 {input_path}: {e}")
 
+# ================== 文件访问路由 ==================
+# @router.head("/files/upload/{filename}", status_code=200)
+# @router.get("/files/upload/{filename}")
+# async def get_upload_file(filename: str):
+#     safe_name = sanitize_filename(filename)
+#     if safe_name != filename:
+#         raise HTTPException(status_code=400, detail="非法文件名")
+#     file_path = os.path.join(UPLOAD_DIR, safe_name)
+#     if not _is_safe_path(UPLOAD_DIR, file_path) or not os.path.exists(file_path):
+#         raise HTTPException(status_code=404, detail="文件不存在")
+#     return FileResponse(file_path)
+#
+#
+# @router.head("/files/result/{filename}", status_code=200)
+# @router.get("/files/result/{filename}")
+# async def get_result_file(filename: str):
+#     safe_name = sanitize_filename(filename)
+#     if safe_name != filename:
+#         raise HTTPException(status_code=400, detail="非法文件名")
+#     file_path = os.path.join(RESULT_DIR, safe_name)
+#     if not _is_safe_path(RESULT_DIR, file_path) or not os.path.exists(file_path):
+#         raise HTTPException(status_code=404, detail="文件不存在")
+#     return FileResponse(file_path)
+
+
 # ================== 视频处理核心函数 ==================
 def process_video_with_controls(video_id: str, input_path: str, output_path: str, conf_threshold: float = 0.5):
     if model is None:
@@ -129,19 +142,17 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
     results = model.track(
         source=input_path,
         imgsz=1280,
-        conf=0.01,
+        conf=conf_threshold,
         iou=0.5,
         persist=True,
-        # tracker="bytetrack.yaml",
+        tracker="bytetrack.yaml",
         verbose=False,
         device=device_opt,  # 这里指定 GPU/CPU
         stream=True
     )
-    # ================== 参数配置 ==================
-    MAX_LOST_FRAMES = 30  # 轨迹最多容忍丢失 30 帧（约1秒@30fps），应 ≥ tracker 的 track_buffer
 
-    active_tracks = {}  # 所有活跃轨迹: {track_id: {class, last_seen, display_id, bbox, visible, lost_count}}
-    track_id_to_display_id = {}  # 映射原始 track_id → 连续展示 ID
+    active_tracks = {}
+    track_id_to_display_id = {}
     next_display_id = 1
     frame_detections = []
 
@@ -158,9 +169,6 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
             "timestamp": frame_idx / fps if fps > 0 else frame_idx / 25
         }
 
-        current_frame_track_ids = set()
-
-        # ========== 1. 处理当前帧检测到的目标 ==========
         if result.boxes is not None and result.boxes.id is not None:
             boxes = result.boxes.xyxy.cpu().numpy()
             track_ids = result.boxes.id.cpu().numpy().astype(int)
@@ -170,16 +178,10 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
             for box, track_id, conf, class_id in zip(boxes, track_ids, confidences, class_ids):
                 x1, y1, x2, y2 = map(int, box)
                 class_name = model.names[int(class_id)]
-                bbox_area = (x2 - x1) * (y2 - y1)  # ✅ 已修复：原来是 (y2 - y2)
-
-                if bbox_area < 300:
+                bbox_area = (x2 - x1) * (y2 - y1)
+                if bbox_area < 300 or conf < conf_threshold:
                     continue
 
-                class_specific_threshold = CLASS_CONF_THRESHOLDS.get(class_name, CLASS_CONF_THRESHOLDS["__default__"])
-                if conf < class_specific_threshold:
-                    continue
-
-                # 分配 display_id（首次出现）
                 if track_id not in track_id_to_display_id:
                     track_id_to_display_id[track_id] = next_display_id
                     next_display_id += 1
@@ -187,13 +189,12 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
                 display_id = track_id_to_display_id[track_id]
                 color = get_color_by_class_and_id(class_name, display_id)
 
-                # 构建检测信息（可见）
                 detection_info = {
                     "id": display_id,
                     "track_id": int(track_id),
                     "class": class_name,
                     "confidence": float(conf),
-                    "bbox": [x1, y1, x2, y2],
+                    "bbox": [int(x1), int(y1), int(x2), int(y2)],
                     "color": color,
                     "area": bbox_area,
                     "visible": True
@@ -201,52 +202,15 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
 
                 frame_detection_data["detections"].append(detection_info)
                 draw_detection_box(frame, detection_info)
-
-                # 更新轨迹状态
                 active_tracks[track_id] = {
                     'class': class_name,
                     'last_seen': frame_idx,
                     'display_id': display_id,
-                    'current_bbox': [x1, y1, x2, y2],
-                    'visible': True,
-                    'lost_count': 0
+                    'current_bbox': [x1, y1, x2, y2]
                 }
-                current_frame_track_ids.add(track_id)
 
-        # ========== 2. 处理遮挡/丢失的目标（仍处于活跃状态） ==========
-        for tid in list(active_tracks.keys()):
-            if tid not in current_frame_track_ids:
-                # 目标本帧未检测到 → 标记为遮挡
-                active_tracks[tid]['lost_count'] += 1
-                active_tracks[tid]['visible'] = False
-
-                # 如果丢失太久，彻底移除轨迹
-                if active_tracks[tid]['lost_count'] > MAX_LOST_FRAMES:
-                    del active_tracks[tid]
-                else:
-                    # 可选：将“刚丢失”的目标也加入 detections（用于前端显示遮挡状态）
-                    # 注意：这里 bbox 是上一次的位置，可能不准
-                    track = active_tracks[tid]
-                    detection_info = {
-                        "id": track['display_id'],
-                        "track_id": tid,
-                        "class": track['class'],
-                        "confidence": 0.0,  # 表示不可见
-                        "bbox": track['current_bbox'],
-                        "color": track['color'] if 'color' in track else get_color_by_class_and_id(track['class'],
-                                                                                                   track['display_id']),
-                        "area": (track['current_bbox'][2] - track['current_bbox'][0]) *
-                                (track['current_bbox'][3] - track['current_bbox'][1]),
-                        "visible": False
-                    }
-                    frame_detection_data["detections"].append(detection_info)
-                    # 可选：画一个半透明/虚线框表示遮挡（需修改 draw_detection_box）
-                    # draw_occluded_box(frame, detection_info)
-            else:
-                # 已在上面处理过，确保 visible=True（冗余安全）
-                active_tracks[tid]['visible'] = True
-
-        # ========== 3. 保存帧数据 & 写入视频 ==========
+        # draw_frame_stats(frame, frame_idx, len(frame_detection_data["detections"]),
+        #                  total_frames, fps, w)
         frame_detections.append(frame_detection_data)
         out.write(frame)
 
@@ -294,7 +258,7 @@ def _validate_video_id(video_id: str):
 async def detect_video(
         file: UploadFile = File(...),
         background_tasks: BackgroundTasks = None,
-        conf: float = Query(0.375, ge=0.0, le=1.0)
+        conf: float = 0.5
 ):
     if conf < 0 or conf > 1:
         raise HTTPException(status_code=400, detail="置信度应在 0~1 之间")
