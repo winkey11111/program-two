@@ -44,6 +44,20 @@ except Exception as e:
 video_detection_data: Dict[str, Any] = {}
 
 # ================== 辅助函数 ==================
+
+def get_class_specific_confidences(class_name: str) -> float:
+    """根据类别返回推荐置信度"""
+    thresholds = {
+        "pedestrian": 0.3,
+        "bicycle": 0.4,
+        "vehicle": 0.4,
+        "bus": 0.4,
+        "truck": 0.4,
+        "tricycle": 0.3,
+        "engine": 0.4,
+    }
+    return thresholds.get(class_name, 0.5)
+
 def sanitize_filename(filename: str) -> str:
     """清理文件名，仅保留安全字符"""
     return re.sub(r"[^a-zA-Z0-9_.-]", "_", filename)
@@ -90,33 +104,18 @@ def convert_to_h264_compatible(input_path: str, output_path: str):
             except OSError as e:
                 logger.warning(f"⚠️ 无法删除临时文件 {input_path}: {e}")
 
-# ================== 文件访问路由 ==================
-# @router.head("/files/upload/{filename}", status_code=200)
-# @router.get("/files/upload/{filename}")
-# async def get_upload_file(filename: str):
-#     safe_name = sanitize_filename(filename)
-#     if safe_name != filename:
-#         raise HTTPException(status_code=400, detail="非法文件名")
-#     file_path = os.path.join(UPLOAD_DIR, safe_name)
-#     if not _is_safe_path(UPLOAD_DIR, file_path) or not os.path.exists(file_path):
-#         raise HTTPException(status_code=404, detail="文件不存在")
-#     return FileResponse(file_path)
-#
-#
-# @router.head("/files/result/{filename}", status_code=200)
-# @router.get("/files/result/{filename}")
-# async def get_result_file(filename: str):
-#     safe_name = sanitize_filename(filename)
-#     if safe_name != filename:
-#         raise HTTPException(status_code=400, detail="非法文件名")
-#     file_path = os.path.join(RESULT_DIR, safe_name)
-#     if not _is_safe_path(RESULT_DIR, file_path) or not os.path.exists(file_path):
-#         raise HTTPException(status_code=404, detail="文件不存在")
-#     return FileResponse(file_path)
-
-
 # ================== 视频处理核心函数 ==================
-def process_video_with_controls(video_id: str, input_path: str, output_path: str, conf_threshold: float = 0.5):
+def process_video_with_controls(
+    video_id: str,
+    input_path: str,
+    output_path: str,
+    conf: float = 0.5,
+    auto_conf: bool = False):
+    if auto_conf:
+        conf_threshold = get_optimal_confidence()
+    else:
+        conf_threshold = conf
+
     if model is None:
         raise HTTPException(status_code=500, detail="模型未加载成功")
 
@@ -142,12 +141,12 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
     results = model.track(
         source=input_path,
         imgsz=1280,
-        conf=conf_threshold,
+        conf=0.01,  # <<< 关键：降低推理阈值
         iou=0.5,
         persist=True,
         tracker="bytetrack.yaml",
         verbose=False,
-        device=device_opt,  # 这里指定 GPU/CPU
+        device=device_opt,
         stream=True
     )
 
@@ -178,8 +177,9 @@ def process_video_with_controls(video_id: str, input_path: str, output_path: str
             for box, track_id, conf, class_id in zip(boxes, track_ids, confidences, class_ids):
                 x1, y1, x2, y2 = map(int, box)
                 class_name = model.names[int(class_id)]
+                class_threshold = get_class_specific_confidences(class_name)
                 bbox_area = (x2 - x1) * (y2 - y1)
-                if bbox_area < 300 or conf < conf_threshold:
+                if bbox_area < 300 or conf < class_threshold:
                     continue
 
                 if track_id not in track_id_to_display_id:
@@ -256,9 +256,10 @@ def _validate_video_id(video_id: str):
 
 @router.post("/detect/video")
 async def detect_video(
-        file: UploadFile = File(...),
-        background_tasks: BackgroundTasks = None,
-        conf: float = 0.5
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
+    conf: float = Query(0.5, ge=0.0, le=1.0),  # 用户可选
+    auto_conf: bool = Query(False)  # 是否启用自动最优阈值
 ):
     if conf < 0 or conf > 1:
         raise HTTPException(status_code=400, detail="置信度应在 0~1 之间")
@@ -289,7 +290,13 @@ async def detect_video(
             "video_info": {}
         }
         try:
-            result_info = process_video_with_controls(video_id, save_path, out_path, conf_threshold=conf)
+            result_info = process_video_with_controls(
+                video_id,
+                save_path,
+                out_path,
+                conf=conf,
+                auto_conf=auto_conf
+            )
 
             db = SessionLocal()
             try:
@@ -334,6 +341,24 @@ async def detect_video(
         }
     }
 # ================== 框控制和辅助函数 ==================
+
+# ================== 自动置信度选择函数 ==================
+def get_optimal_confidence():
+    """根据 F1-Confidence 曲线返回推荐置信度"""
+    # 根据图像数据，我们手动设定一个“经验”映射表
+    # 实际项目中可以加载训练后的校准文件或 JSON 配置
+    optimal_conf = {
+        "all": 0.375,
+        "pedestrian": 0.3,
+        "bicycle": 0.4,
+        "vehicle": 0.4,
+        "bus": 0.4,
+        "truck": 0.4,
+        "tricycle": 0.3,
+        "engine": 0.4
+    }
+    return optimal_conf["all"]  # 默认取综合最优
+
 def regenerate_video_with_controls(video_id: str, hidden_ids: List[int],
                                    input_path: str, output_path: str):
     if video_id not in video_detection_data:
